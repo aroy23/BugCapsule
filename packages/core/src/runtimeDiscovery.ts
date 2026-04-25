@@ -89,6 +89,7 @@ export async function createCapsuleFromRuntime(options: CreateCapsuleFromRuntime
     ...(options.mockPolicy ? { mockPolicy: options.mockPolicy } : {}),
     ...(options.installDependencies === undefined ? {} : { installDependencies: options.installDependencies }),
     ...(options.verifyCapsule === undefined ? {} : { verifyCapsule: options.verifyCapsule }),
+    capsuleRunScript: "repro",
     additionalFiles: [
       {
         capsulePath: generatedRepro.path,

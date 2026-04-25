@@ -168,7 +168,7 @@ function buildWorkflow(
         {
           step: 2,
           action: "fix_capsule",
-          detail: "Open the returned capsulePath, run npm test inside the capsule, and fix only mapped capsule files."
+          detail: "Open the returned capsulePath, run the returned capsule runCommand, and fix only mapped capsule files."
         },
         {
           step: 3,

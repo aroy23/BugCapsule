@@ -2,6 +2,7 @@ export type PackageManager = "npm" | "pnpm" | "yarn" | "unknown";
 export type TestRunner = "vitest" | "jest" | "playwright" | "unknown";
 export type Framework = "next" | "vite" | "node" | "unknown";
 export type MockMode = "auto" | "manual" | "fixture" | "empty" | "passthrough" | "fail";
+export type CapsuleRunScript = "test" | "repro";
 
 export type ProjectInfo = {
   rootPath: string;
@@ -113,6 +114,7 @@ export type CreateCapsuleOptions = {
   verifyCapsule?: boolean;
   outputFormat?: "text" | "json";
   additionalFiles?: AdditionalCapsuleFile[];
+  capsuleRunScript?: CapsuleRunScript;
 };
 
 export type AdditionalCapsuleFile = {

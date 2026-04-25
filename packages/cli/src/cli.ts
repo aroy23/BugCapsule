@@ -382,7 +382,7 @@ function printCreateResult(result: CreateCapsuleResult): void {
   console.log(`Status: ${result.status === "created_failing" ? "failing as expected" : result.status}`);
   console.log("\nNext:");
   console.log(`cd ${path.relative(process.cwd(), result.capsulePath)}`);
-  console.log("npm test");
+  console.log(result.manifest.capsule.runCommand);
 }
 
 async function runCli(action: () => Promise<void>): Promise<void> {

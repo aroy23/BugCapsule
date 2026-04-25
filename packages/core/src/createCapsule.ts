@@ -12,7 +12,7 @@ import { detectProject } from "./projectDetector.js";
 import { runShellCommand } from "./shell.js";
 import { selectSlice } from "./slicer.js";
 import { assertInsideRoot, normalizePath, slugify } from "./pathUtils.js";
-import type { AdditionalCapsuleFile, BugCapsuleManifest, BugCapsuleReport, CapsuleFileMapping, CreateCapsuleOptions, CreateCapsuleResult } from "./types.js";
+import type { AdditionalCapsuleFile, BugCapsuleManifest, BugCapsuleReport, CapsuleFileMapping, CapsuleRunScript, CreateCapsuleOptions, CreateCapsuleResult } from "./types.js";
 
 type PackageJson = {
   name?: string;
@@ -54,6 +54,8 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
 
   const maxFiles = options.maxFiles ?? defaultConfig.create.defaultMaxFiles;
   const maxDepth = options.maxDepth ?? defaultConfig.create.defaultMaxDepth;
+  const capsuleRunScript = options.capsuleRunScript ?? "test";
+  const capsuleRunCommand = capsuleRunCommandFor(capsuleRunScript);
   const slice = await selectSlice({
     repoPath,
     command: options.command,
@@ -109,7 +111,7 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
     fileMappings.push(mapping);
   }
 
-  const packageContent = await renderCapsulePackage(repoPath, project.testRunner, capsuleId, options.command);
+  const packageContent = await renderCapsulePackage(repoPath, project.testRunner, capsuleId, options.command, capsuleRunScript);
   const packageHash = hashString(packageContent);
   await writeTextFile(path.join(capsulePath, "package.json"), packageContent);
   fileMappings.push({
@@ -152,7 +154,7 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
     capsule: {
       path: capsulePath,
       installCommand: "npm install",
-      runCommand: "npm test",
+      runCommand: capsuleRunCommand,
       expectedInitialStatus: "failing",
       testFramework: project.testRunner
     },
@@ -233,7 +235,13 @@ async function resolveCapsuleId(repoPath: string, options: CreateCapsuleOptions)
   return candidate;
 }
 
-async function renderCapsulePackage(repoPath: string, testRunner: string, capsuleId: string, originalCommand: string): Promise<string> {
+async function renderCapsulePackage(
+  repoPath: string,
+  testRunner: string,
+  capsuleId: string,
+  originalCommand: string,
+  capsuleRunScript: CapsuleRunScript
+): Promise<string> {
   const sourcePackage = await readJsonFile<PackageJson>(path.join(repoPath, "package.json"));
   const testCommand = capsuleTestScript(sourcePackage, testRunner, originalCommand);
   const devDependencies = {
@@ -246,13 +254,17 @@ async function renderCapsulePackage(repoPath: string, testRunner: string, capsul
     private: true,
     type: "module",
     scripts: {
-      test: testCommand
+      [capsuleRunScript]: testCommand
     },
     dependencies: {},
     devDependencies
   };
 
   return `${JSON.stringify(packageJson, null, 2)}\n`;
+}
+
+function capsuleRunCommandFor(scriptName: CapsuleRunScript): string {
+  return scriptName === "test" ? "npm test" : `npm run ${scriptName}`;
 }
 
 function capsuleTestScript(sourcePackage: PackageJson, testRunner: string, originalCommand: string): string {
@@ -383,7 +395,7 @@ async function buildEmptyManifest(
     capsule: {
       path: capsulePathFor(repoPath, capsuleId),
       installCommand: "npm install",
-      runCommand: "npm test",
+      runCommand: capsuleRunCommandFor(options.capsuleRunScript ?? "test"),
       expectedInitialStatus: "failing",
       testFramework: "unknown"
     },

@@ -9,7 +9,7 @@ export async function verifyCapsule(options: VerifyCapsuleOptions): Promise<Veri
   const capsule = await runShellCommand(manifest.capsule.runCommand, capsulePath);
 
   checks.push({
-    name: "capsule test",
+    name: "capsule repro",
     status: capsule.exitCode === 0 ? "passed" : "failed",
     command: manifest.capsule.runCommand,
     stdout: capsule.stdout,

@@ -230,7 +230,7 @@ function registerTools(mcp: McpServer): void {
     "bugcapsule_run",
     {
       title: "Run BugCapsule",
-      description: "Run a capsule repro command. Use this after bugcapsule_create_from_command if the agent wants MCP to execute the capsule test instead of running a shell command directly.",
+      description: "Run a capsule repro command. Use this after creating a capsule if the agent wants MCP to execute the capsule repro instead of running a shell command directly.",
       inputSchema: {
         repoPath: z.string(),
         capsuleId: z.string(),
@@ -270,7 +270,7 @@ function registerTools(mcp: McpServer): void {
     "bugcapsule_apply_patch",
     {
       title: "Apply BugCapsule Patch",
-      description: "Apply changed capsule files back to their original source paths. Call this after the capsule tests pass; default verify=true reruns both capsule and original repro.",
+      description: "Apply changed capsule files back to their original source paths. Call this after the capsule repro passes; default verify=true reruns both capsule and original repro.",
       inputSchema: {
         repoPath: z.string(),
         capsuleId: z.string(),

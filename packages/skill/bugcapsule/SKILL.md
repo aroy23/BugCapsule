@@ -52,7 +52,7 @@ If the user only describes a website/runtime bug and gives a local URL, call `bu
 6. Open the generated capsule path.
 7. Read `README.md` and `capsule.json`.
 8. Run the capsule repro command.
-9. Fix the failing capsule test.
+9. Fix the failing capsule repro.
 10. Run the capsule repro command again.
 11. Call `bugcapsule_apply_patch` with `verify=true`.
 12. Summarize which original files changed and which verification checks passed.

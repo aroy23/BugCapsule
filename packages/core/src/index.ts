@@ -19,6 +19,7 @@ export type {
   CapsuleFileMapping,
   CapsuleFixture,
   CapsuleMock,
+  CapsuleRunScript,
   CapturedFailure,
   CreateCapsuleOptions,
   CreateCapsuleFromRuntimeOptions,
