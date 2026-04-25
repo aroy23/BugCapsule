@@ -88,7 +88,8 @@ describe("probeRuntime", () => {
       "TypeError: Cannot read properties of null (reading 'line1')",
       `    at normalizeShippingAddress (${path.join(repoPath, "src/checkout/normalizeAddress.ts")}:8:25)`,
       `    at buildFulfillmentRequest (${path.join(repoPath, "src/checkout/fulfillmentRequest.ts")}:5:19)`,
-      `    at completeCheckout (${path.join(repoPath, "src/checkout/checkoutService.ts")}:8:10)`
+      `    at completeCheckout (${path.join(repoPath, "src/checkout/checkoutService.ts")}:8:10)`,
+      `    at handleCheckout (${path.join(repoPath, "src/server.ts")}:6:10)`
     ].join("\n");
     const baseUrl = await startServer((request, response) => {
       const requestUrl = new URL(request.url ?? "/", "http://localhost");
@@ -141,13 +142,24 @@ describe("probeRuntime", () => {
     const capsuleFiles = result.manifest.files.map((file) => file.capsulePath);
     expect(capsuleFiles).toEqual(expect.arrayContaining([
       ".bugcapsule/repros/bc_runtime_checkout.ts",
+      "src/checkout/inputSanitizer.ts",
       "src/checkout/fulfillmentRequest.ts",
       "src/checkout/normalizeAddress.ts",
+      "src/server.ts",
       "src/checkout/types.ts"
     ]));
-    expect(capsuleFiles).not.toContain("src/checkout/checkoutService.ts");
     expect(capsuleFiles).not.toContain("src/analytics/checkoutAnalytics.ts");
     expect(capsuleFiles).not.toContain("src/payments/paymentGateway.ts");
+    expect(result.manifest.suspectedUpstreamCauses).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "src/checkout/inputSanitizer.ts"
+      })
+    ]));
+    expect(result.manifest.inputLineage?.requestBoundary).toEqual(sampleInput);
+    const readme = await fs.readFile(path.join(result.capsulePath, "README.md"), "utf8");
+    expect(readme).toContain("## Upstream candidates");
+    expect(readme).toContain("src/checkout/inputSanitizer.ts");
+    expect(readme).toContain("## Symptom-patch warning");
     await expect(fs.readdir(path.join(repoPath, ".bugcapsule/repros"))).resolves.toEqual(["bc_runtime_checkout.ts"]);
 
     await writeFile(result.capsulePath, "src/checkout/normalizeAddress.ts", `import type { Address } from "./types.js";
@@ -173,7 +185,25 @@ export function normalizeShippingAddress(address: Address | null): NormalizedAdd
     const weakFix = await runShellCommand(result.manifest.capsule.runCommand, result.capsulePath);
 
     expect(weakFix.exitCode).not.toBe(0);
-    expect(weakFix.stderr).toContain("Runtime repro produced empty or placeholder output at result.destination");
+    expect(weakFix.stderr).toContain("Runtime repro produced a placeholder value");
+    expect(weakFix.stderr).toContain("Inspect the upstream candidates");
+    expect(weakFix.stderr).toContain("Input lineage:");
+    expect(weakFix.stderr).toContain("Boundary-vs-failure diff:");
+    expect(weakFix.stderr).toContain("normalizeShippingAddress");
+
+    const lineagePath = path.join(result.capsulePath, ".bugcapsule/repros/bc_runtime_checkout.lineage.json");
+    const lineage = JSON.parse(await fs.readFile(lineagePath, "utf8")) as {
+      requestBoundary: unknown;
+      tape: Array<{ file: string; functionName: string; firstArg: unknown }>;
+    };
+    expect(lineage.requestBoundary).toEqual(sampleInput);
+    expect(lineage.tape).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        file: "src/checkout/normalizeAddress.ts",
+        functionName: "normalizeShippingAddress",
+        firstArg: null
+      })
+    ]));
   });
 });
 
@@ -267,6 +297,26 @@ export function completeCheckout(input: CheckoutInput): { destination: string } 
   authorizePayment(input.paymentToken);
   publishCheckoutAnalytics(input.cartId);
   return buildFulfillmentRequest(input);
+}
+`);
+  await writeFile(repoPath, "src/checkout/inputSanitizer.ts", `import type { Address, CheckoutInput } from "./types.js";
+
+export function sanitizeCheckoutInput(raw: CheckoutInput): CheckoutInput {
+  return {
+    ...raw,
+    customer: {
+      ...raw.customer,
+      shippingAddress: raw.customer.shippingAddress ?? ({} as Address)
+    }
+  };
+}
+`);
+  await writeFile(repoPath, "src/server.ts", `import { sanitizeCheckoutInput } from "./checkout/inputSanitizer.js";
+import { completeCheckout } from "./checkout/checkoutService.js";
+import type { CheckoutInput } from "./checkout/types.js";
+
+export function handleCheckout(raw: CheckoutInput): { destination: string } {
+  return completeCheckout(sanitizeCheckoutInput(raw));
 }
 `);
   await writeFile(repoPath, "src/analytics/checkoutAnalytics.ts", `export function publishCheckoutAnalytics(cartId: string): void {

@@ -45,6 +45,16 @@ export type CapsuleFixture = {
   description: string;
 };
 
+export type SuspectedUpstreamCause = {
+  path: string;
+  reason: string;
+};
+
+export type InputLineage = {
+  requestBoundary?: unknown;
+  requestBoundarySource?: string;
+};
+
 export type BugCapsuleManifest = {
   schemaVersion: "0.1";
   capsuleId: string;
@@ -75,6 +85,8 @@ export type BugCapsuleManifest = {
   files: CapsuleFileMapping[];
   mocks: CapsuleMock[];
   fixtures: CapsuleFixture[];
+  suspectedUpstreamCauses: SuspectedUpstreamCause[];
+  inputLineage?: InputLineage;
   metrics: {
     originalFileCount: number;
     capsuleFileCount: number;
@@ -104,6 +116,9 @@ export type CreateCapsuleOptions = {
   outputFormat?: "text" | "json";
   additionalFiles?: AdditionalCapsuleFile[];
   capsuleRunScript?: CapsuleRunScript;
+  inputLineage?: InputLineage;
+  upstreamStackTrace?: StackFrame[];
+  sliceStackTrace?: StackFrame[];
 };
 
 export type AdditionalCapsuleFile = {

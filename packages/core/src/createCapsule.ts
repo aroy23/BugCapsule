@@ -52,7 +52,9 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
     maxFiles,
     maxDepth,
     ...(options.includeGlobs ? { includeGlobs: options.includeGlobs } : {}),
-    ...(options.excludeGlobs ? { excludeGlobs: options.excludeGlobs } : {})
+    ...(options.excludeGlobs ? { excludeGlobs: options.excludeGlobs } : {}),
+    ...(options.upstreamStackTrace ? { upstreamStackTrace: options.upstreamStackTrace } : {}),
+    ...(options.sliceStackTrace ? { rootStackTrace: options.sliceStackTrace } : {})
   });
   const mockPlan = createMockPlan(slice.externalImports.filter((binding) => shouldMockModule(binding.moduleName)));
   const capsulePath = capsulePathFor(repoPath, capsuleId);
@@ -138,7 +140,7 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
       stdoutPath: manifestRelativeLogPath(capsuleId, "original.stdout.log"),
       stderrPath: manifestRelativeLogPath(capsuleId, "original.stderr.log"),
       failureSummary: failure.failureSummary,
-      stackTrace: failure.stackTrace
+      stackTrace: options.upstreamStackTrace ?? failure.stackTrace
     },
     capsule: {
       path: capsulePath,
@@ -156,6 +158,8 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
         source: "copied" as const,
         description: "Fixture imported by the failing test slice."
       })),
+    suspectedUpstreamCauses: slice.suspectedUpstreamCauses,
+    ...(options.inputLineage ? { inputLineage: options.inputLineage } : {}),
     metrics: {
       originalFileCount: originalFiles.length,
       capsuleFileCount: fileMappings.length,
@@ -377,6 +381,7 @@ async function buildEmptyManifest(
     files: [],
     mocks: [],
     fixtures: [],
+    suspectedUpstreamCauses: [],
     metrics: {
       originalFileCount: 0,
       capsuleFileCount: 0,

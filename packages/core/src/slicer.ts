@@ -6,7 +6,8 @@ import { defaultConfig } from "./config.js";
 import { buildImportGraph, type ImportBinding } from "./importGraph.js";
 import { isSecretPath, isTypeScriptLike } from "./fileUtils.js";
 import { normalizePath } from "./pathUtils.js";
-import type { CapturedFailure } from "./types.js";
+import { findUpstreamCandidates } from "./upstreamCandidates.js";
+import type { CapturedFailure, SuspectedUpstreamCause } from "./types.js";
 
 export type SliceFile = {
   path: string;
@@ -17,6 +18,7 @@ export type SliceFile = {
 export type SliceResult = {
   files: SliceFile[];
   externalImports: ImportBinding[];
+  suspectedUpstreamCauses: SuspectedUpstreamCause[];
 };
 
 export async function selectSlice(options: {
@@ -25,6 +27,8 @@ export async function selectSlice(options: {
   failure: CapturedFailure;
   includeGlobs?: string[];
   excludeGlobs?: string[];
+  upstreamStackTrace?: CapturedFailure["stackTrace"];
+  rootStackTrace?: CapturedFailure["stackTrace"];
   maxFiles: number;
   maxDepth: number;
 }): Promise<SliceResult> {
@@ -78,9 +82,29 @@ export async function selectSlice(options: {
     }
   }
 
+  const suspectedUpstreamCauses = await findUpstreamCandidates({
+    repoPath: options.repoPath,
+    stackTrace: options.upstreamStackTrace ?? options.failure.stackTrace
+  });
+
+  for (const cause of suspectedUpstreamCauses) {
+    if (isExcluded(cause.path, excluded) || isSecretPath(cause.path) || !isTypeScriptLike(cause.path)) {
+      continue;
+    }
+
+    if (!selected.has(cause.path)) {
+      selected.set(cause.path, {
+        path: cause.path,
+        kind: classifyFile(cause.path),
+        reason: `Suspected upstream cause: ${cause.reason}`
+      });
+    }
+  }
+
   return {
     files: [...selected.values()].sort((left, right) => left.path.localeCompare(right.path)),
-    externalImports
+    externalImports,
+    suspectedUpstreamCauses
   };
 }
 
@@ -88,9 +112,11 @@ async function findRootFiles(options: {
   repoPath: string;
   command: string;
   failure: CapturedFailure;
+  rootStackTrace?: CapturedFailure["stackTrace"];
   includeGlobs?: string[];
 }): Promise<string[]> {
-  const stackFiles = options.failure.stackTrace.map((frame) => frame.file).filter(isTypeScriptLike);
+  const stackTrace = options.rootStackTrace ?? options.failure.stackTrace;
+  const stackFiles = stackTrace.map((frame) => frame.file).filter(isTypeScriptLike);
   const commandRoots = await findFilesFromCommand(options.repoPath, options.command);
   const includeRoots = options.includeGlobs && options.includeGlobs.length > 0
     ? await fg(options.includeGlobs, { cwd: options.repoPath, onlyFiles: true, dot: true })

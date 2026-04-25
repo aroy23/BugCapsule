@@ -14,12 +14,48 @@ export async function readManifest(capsulePath: string): Promise<BugCapsuleManif
 }
 
 export async function writeReadme(capsulePath: string, manifest: BugCapsuleManifest): Promise<void> {
-  const rows = manifest.files
+  const suspectedUpstreamCauses = manifest.suspectedUpstreamCauses ?? [];
+  const upstreamPaths = new Set(suspectedUpstreamCauses.map((cause) => cause.path));
+  const rows = [...manifest.files]
     .filter((file) => file.originalPath)
-    .map((file) => `| ${file.capsulePath} | ${file.originalPath} |`)
+    .sort((left, right) => Number(upstreamPaths.has(right.originalPath)) - Number(upstreamPaths.has(left.originalPath)) || left.capsulePath.localeCompare(right.capsulePath))
+    .map((file) => `| ${file.capsulePath} | ${file.originalPath} | ${upstreamPaths.has(file.originalPath) ? "Suspected upstream cause" : ""} |`)
+    .join("\n");
+  const upstreamSection = renderUpstreamCandidates(manifest);
+  const inputLineageSection = renderInputLineage(manifest);
+
+  await writeTextFile(path.join(capsulePath, "README.md"), `# BugCapsule: ${manifest.name}\n\n## Bug\n\n${manifest.originalRepro.failureSummary}\n\n## Original repro\n\n\`\`\`bash\n${manifest.originalRepro.command}\n\`\`\`\n\n## Capsule repro\n\n\`\`\`bash\nnpm install\n${manifest.capsule.runCommand}\n\`\`\`\n\n## Expected behavior\n\nThe repro command should pass after the bug is fixed.\n\n## Current behavior\n\nThe repro command currently fails with:\n\n\`\`\`text\n${manifest.originalRepro.failureSummary}\n\`\`\`\n\n${upstreamSection}${inputLineageSection}## Files copied from original repo\n\n| Capsule file | Original file | Signal |\n|---|---|---|\n${rows}\n\n## Symptom-patch warning\n\n${antiSymptomPatchingInstructions()}\n\n## Instructions for coding agents\n\n1. Run \`${manifest.capsule.runCommand}\`.\n2. Fix the failing behavior.\n3. Keep the fix minimal.\n4. Do not remove the repro.\n5. After the repro passes, call the MCP tool \`bugcapsule_apply_patch\` with \`repoPath\`, \`capsuleId: "${manifest.capsuleId}"\`, and \`verify: true\`.\n`);
+}
+
+function renderUpstreamCandidates(manifest: BugCapsuleManifest): string {
+  const suspectedUpstreamCauses = manifest.suspectedUpstreamCauses ?? [];
+
+  if (suspectedUpstreamCauses.length === 0) {
+    return "";
+  }
+
+  const rows = suspectedUpstreamCauses
+    .map((cause) => `- \`${cause.path}\` - ${cause.reason}`)
     .join("\n");
 
-  await writeTextFile(path.join(capsulePath, "README.md"), `# BugCapsule: ${manifest.name}\n\n## Bug\n\n${manifest.originalRepro.failureSummary}\n\n## Original repro\n\n\`\`\`bash\n${manifest.originalRepro.command}\n\`\`\`\n\n## Capsule repro\n\n\`\`\`bash\nnpm install\n${manifest.capsule.runCommand}\n\`\`\`\n\n## Expected behavior\n\nThe repro command should pass after the bug is fixed.\n\n## Current behavior\n\nThe repro command currently fails with:\n\n\`\`\`text\n${manifest.originalRepro.failureSummary}\n\`\`\`\n\n## Files copied from original repo\n\n| Capsule file | Original file |\n|---|---|\n${rows}\n\n## Instructions for coding agents\n\n1. Run \`${manifest.capsule.runCommand}\`.\n2. Fix the failing behavior.\n3. Keep the fix minimal.\n4. Do not remove the repro.\n5. After the repro passes, call the MCP tool \`bugcapsule_apply_patch\` with \`repoPath\`, \`capsuleId: "${manifest.capsuleId}"\`, and \`verify: true\`.\n`);
+  return `## Upstream candidates\n\nThese files appear in the static call graph above the failure site and construct or transform the value passed to the failing function. If the failing function received malformed input, the cause is likely here:\n\n${rows}\n\n`;
+}
+
+function renderInputLineage(manifest: BugCapsuleManifest): string {
+  if (!manifest.inputLineage || !("requestBoundary" in manifest.inputLineage)) {
+    return "";
+  }
+
+  const source = manifest.inputLineage.requestBoundarySource
+    ? `\nSource: ${manifest.inputLineage.requestBoundarySource}\n`
+    : "\n";
+  const payload = JSON.stringify(manifest.inputLineage.requestBoundary, null, 2);
+
+  return `## Request boundary input\n${source}\n\`\`\`json\n${payload}\n\`\`\`\n\n`;
+}
+
+function antiSymptomPatchingInstructions(): string {
+  return `Important: A fix that makes the throw stop but produces fabricated output (empty strings, "Unknown", default values not derived from the input) is NOT an acceptable fix. Before patching the failing function:\n\n1. Inspect the value the function received at the failure site.\n2. If that value looks malformed (null, {}, undefined, NaN, etc.), trace it backwards through the call stack to find where it was constructed.\n3. Check the "Upstream candidates" section of this README for files that transformed the input before it reached the failure site.\n4. Prefer fixing the upstream cause, validating-and-rejecting at the boundary, or returning a clear error to the user over defensive padding at the failure site.`;
 }
 
 export function capsulePathFor(repoPath: string, capsuleId: string): string {

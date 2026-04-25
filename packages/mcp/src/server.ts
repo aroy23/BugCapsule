@@ -29,6 +29,14 @@ const server = new McpServer({
 });
 
 const tracker = new SessionTracker();
+const ANTI_SYMPTOM_PATCHING_INSTRUCTIONS = [
+  "Important: A fix that makes the throw stop but produces fabricated output (empty strings, \"Unknown\", default values not derived from the input) is NOT an acceptable fix.",
+  "Before patching the failing function:",
+  "1. Inspect the value the function received at the failure site.",
+  "2. If that value looks malformed (null, {}, undefined, NaN, etc.), trace it backwards through the call stack to find where it was constructed.",
+  "3. Check the \"Upstream candidates\" section of the capsule README for files that transformed the input before it reached the failure site.",
+  "4. Prefer fixing the upstream cause, validating-and-rejecting at the boundary, or returning a clear error to the user over defensive padding at the failure site."
+].join("\n");
 
 registerTools(server, tracker);
 registerResources(server);
@@ -126,6 +134,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
           contextReductionPercent: result.manifest.metrics.contextReductionPercent,
           failureMessage: result.manifest.originalRepro.failureSummary,
           includedEditableFiles: editableFiles(result.manifest),
+          suspectedUpstreamCauses: result.manifest.suspectedUpstreamCauses ?? [],
           generatedMocks: result.manifest.mocks.map((mock) => mock.moduleName)
         },
         agentWorkflow: buildAgentWorkflow(result),
@@ -190,6 +199,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
           contextReductionPercent: result.manifest.metrics.contextReductionPercent,
           failureMessage: result.manifest.originalRepro.failureSummary,
           includedEditableFiles: editableFiles(result.manifest),
+          suspectedUpstreamCauses: result.manifest.suspectedUpstreamCauses ?? [],
           generatedMocks: result.manifest.mocks.map((mock) => mock.moduleName)
         },
         agentWorkflow: buildAgentWorkflow(result),
@@ -386,7 +396,7 @@ function registerPrompts(mcp: McpServer): void {
           role: "user",
           content: {
             type: "text",
-            text: "You are fixing a minimized BugCapsule reproduction.\n\nInstructions:\n1. Open the capsule directory.\n2. Read README.md and capsule.json.\n3. Run the capsule repro command.\n4. Fix the failing behavior inside the capsule.\n5. Do not broaden the fix unnecessarily.\n6. Rerun the capsule repro command.\n7. Once passing, call bugcapsule_apply_patch with verify=true."
+            text: `You are fixing a minimized BugCapsule reproduction.\n\n${ANTI_SYMPTOM_PATCHING_INSTRUCTIONS}\n\nInstructions:\n1. Open the capsule directory.\n2. Read README.md and capsule.json.\n3. Run the capsule repro command.\n4. Fix the failing behavior inside the capsule.\n5. Do not broaden the fix unnecessarily.\n6. Rerun the capsule repro command.\n7. Once passing, call bugcapsule_apply_patch with verify=true.`
           }
         }
       ]
@@ -410,7 +420,7 @@ function registerPrompts(mcp: McpServer): void {
           role: "user",
           content: {
             type: "text",
-            text: `Use BugCapsule to fix this bug.\n\nRepo path:\n${args.repoPath}\n\nFailing command:\n${args.command}\n\nCall bugcapsule_create_from_command first. Follow the agentWorkflow returned by the tool. Fix only files inside the generated capsule until the capsule passes. Then call bugcapsule_apply_patch with verify=true and summarize the original files changed.`
+            text: `Use BugCapsule to fix this bug.\n\nRepo path:\n${args.repoPath}\n\nFailing command:\n${args.command}\n\n${ANTI_SYMPTOM_PATCHING_INSTRUCTIONS}\n\nCall bugcapsule_create_from_command first. Follow the agentWorkflow returned by the tool. Fix only files inside the generated capsule until the capsule passes. Then call bugcapsule_apply_patch with verify=true and summarize the original files changed.`
           }
         }
       ]
@@ -435,7 +445,7 @@ function registerPrompts(mcp: McpServer): void {
           role: "user",
           content: {
             type: "text",
-            text: `Use BugCapsule to fix this runtime bug.\n\nRepo path:\n${args.repoPath}\n\nURL:\n${args.url}\n\nSymptom:\n${args.bugDescription}\n\nCall bugcapsule_create_from_runtime first. Follow the agentWorkflow returned by the tool. Fix only files inside the generated capsule until the capsule passes. Then call bugcapsule_apply_patch with verify=true and summarize the original files changed.`
+            text: `Use BugCapsule to fix this runtime bug.\n\nRepo path:\n${args.repoPath}\n\nURL:\n${args.url}\n\nSymptom:\n${args.bugDescription}\n\n${ANTI_SYMPTOM_PATCHING_INSTRUCTIONS}\n\nCall bugcapsule_create_from_runtime first. Follow the agentWorkflow returned by the tool. Fix only files inside the generated capsule until the capsule passes. Then call bugcapsule_apply_patch with verify=true and summarize the original files changed.`
           }
         }
       ]
