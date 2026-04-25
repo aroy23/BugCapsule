@@ -15,7 +15,6 @@ export type {
   ApplyCapsuleResult,
   BugCapsuleConfig,
   BugCapsuleManifest,
-  BugCapsuleReport,
   CapsuleFileMapping,
   CapsuleFixture,
   CapsuleMock,

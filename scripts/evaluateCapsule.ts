@@ -112,10 +112,7 @@ type EvaluationReport = {
     };
   };
   outputs: {
-    jsonPath: string;
-    markdownPath: string;
     htmlPath: string;
-    svgPath: string;
   };
 };
 
@@ -231,10 +228,7 @@ async function main(): Promise<void> {
 
   const measuredUsage = await buildMeasuredUsage(options);
   const baseName = "evaluation";
-  const jsonPath = path.join(outputDir, `${baseName}.json`);
-  const markdownPath = path.join(outputDir, `${baseName}.md`);
   const htmlPath = path.join(outputDir, `${baseName}.html`);
-  const svgPath = path.join(outputDir, `${baseName}.svg`);
 
   const report: EvaluationReport = {
     schemaVersion: "0.1",
@@ -287,16 +281,10 @@ async function main(): Promise<void> {
     },
     ...(measuredUsage ? { measuredUsage } : {}),
     outputs: {
-      jsonPath,
-      markdownPath,
-      htmlPath,
-      svgPath
+      htmlPath
     }
   };
 
-  await fs.writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-  await fs.writeFile(markdownPath, renderMarkdown(report), "utf8");
-  await fs.writeFile(svgPath, renderSvg(report), "utf8");
   await fs.writeFile(htmlPath, renderHtml(report), "utf8");
 
   process.stdout.write(`${JSON.stringify(report.outputs, null, 2)}\n`);
@@ -728,8 +716,6 @@ function renderMarkdown(report: EvaluationReport): string {
   lines.push("## Visualization Files");
   lines.push("");
   lines.push(`- HTML: \`${report.outputs.htmlPath}\``);
-  lines.push(`- SVG: \`${report.outputs.svgPath}\``);
-  lines.push(`- JSON: \`${report.outputs.jsonPath}\``);
   lines.push("");
 
   return lines.join("\n");

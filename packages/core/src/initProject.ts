@@ -7,7 +7,8 @@ export async function initBugCapsule(repoPath: string): Promise<{ created: strin
   const directories = [
     ".bugcapsule/capsules",
     ".bugcapsule/cache",
-    ".bugcapsule/reports",
+    ".bugcapsule/captures",
+    ".bugcapsule/evaluations",
     ".bugcapsule/patches"
   ];
 

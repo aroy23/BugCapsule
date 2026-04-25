@@ -7,12 +7,12 @@ import { captureFailure } from "./failureCapture.js";
 import { copyTextFile, ensureDir, hashFile, hashString, isSecretPath, listProjectFiles, pathExists, readJsonFile, writeTextFile } from "./fileUtils.js";
 import { ensureBugCapsuleGitignoreEntry } from "./gitignore.js";
 import { createMockPlan, rewriteExternalImports } from "./mockGenerator.js";
-import { capsulePathFor, manifestRelativeLogPath, writeManifest, writeReadme, writeReport } from "./manifest.js";
+import { capsulePathFor, manifestRelativeLogPath, writeManifest, writeReadme } from "./manifest.js";
 import { detectProject } from "./projectDetector.js";
 import { runShellCommand } from "./shell.js";
 import { selectSlice } from "./slicer.js";
 import { assertInsideRoot, normalizePath, slugify } from "./pathUtils.js";
-import type { AdditionalCapsuleFile, BugCapsuleManifest, BugCapsuleReport, CapsuleFileMapping, CapsuleRunScript, CreateCapsuleOptions, CreateCapsuleResult } from "./types.js";
+import type { AdditionalCapsuleFile, BugCapsuleManifest, CapsuleFileMapping, CapsuleRunScript, CreateCapsuleOptions, CreateCapsuleResult } from "./types.js";
 
 type PackageJson = {
   name?: string;
@@ -32,23 +32,12 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
 
   if (failure.exitCode === 0) {
     const emptyManifest = await buildEmptyManifest(repoPath, capsuleId, options, project.packageManager);
-    const report = {
-      capsuleId,
-      status: "failed_original_passed" as const,
-      originalFileCount: (await listProjectFiles(repoPath)).length,
-      capsuleFileCount: 0,
-      contextReductionPercent: 0,
-      failureMessage: "Original command passed.",
-      includedFiles: [],
-      mocks: []
-    };
 
     return {
       capsuleId,
       capsulePath: capsulePathFor(repoPath, capsuleId),
       status: "failed_original_passed",
-      manifest: emptyManifest,
-      report
+      manifest: emptyManifest
     };
   }
 
@@ -190,27 +179,13 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
     ? await runShellCommand(manifest.capsule.runCommand, capsulePath)
     : undefined;
   const status: CreateCapsuleResult["status"] = runResult && runResult.exitCode === 0 ? "created_not_reproduced" : "created_failing";
-  const report: BugCapsuleReport = {
-    capsuleId,
-    status,
-    originalFileCount: manifest.metrics.originalFileCount,
-    capsuleFileCount: manifest.metrics.capsuleFileCount,
-    contextReductionPercent: manifest.metrics.contextReductionPercent,
-    failureMessage: failure.failureSummary,
-    includedFiles: slice.files.map((file) => ({ path: file.path, reason: file.reason })),
-    mocks: mockPlan.mocks
-  };
-  const result: CreateCapsuleResult = {
+
+  return {
     capsuleId,
     capsulePath,
     status,
-    manifest,
-    report
+    manifest
   };
-
-  await writeReport(repoPath, result);
-
-  return result;
 }
 
 async function resolveCapsuleId(repoPath: string, options: CreateCapsuleOptions): Promise<string> {

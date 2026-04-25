@@ -89,17 +89,6 @@ export type BugCapsuleManifest = {
   };
 };
 
-export type BugCapsuleReport = {
-  capsuleId: string;
-  status: CreateCapsuleResult["status"];
-  originalFileCount: number;
-  capsuleFileCount: number;
-  contextReductionPercent: number;
-  failureMessage: string;
-  includedFiles: Array<{ path: string; reason: string }>;
-  mocks: CapsuleMock[];
-};
-
 export type CreateCapsuleOptions = {
   repoPath: string;
   command: string;
@@ -168,7 +157,6 @@ export type CreateCapsuleResult = {
     | "failed_original_passed"
     | "failed_capture_error";
   manifest: BugCapsuleManifest;
-  report: BugCapsuleReport;
 };
 
 export type RuntimeProbeOptions = {

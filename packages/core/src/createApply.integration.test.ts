@@ -33,6 +33,10 @@ describe("BugCapsule create/apply integration", () => {
       "__mocks__/redis.ts"
     ]));
     expect(created.manifest.mocks.map((mock) => mock.moduleName)).toEqual(["redis"]);
+    expect(created.manifest.originalRepro.stdoutPath).toBe(".bugcapsule/captures/bc_invoice_address_null/original.stdout.log");
+    await expect(fs.access(path.join(repoPath, ".bugcapsule", "captures", created.capsuleId, "original.stderr.log"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(repoPath, ".bugcapsule", "reports", created.capsuleId, "report.md"))).rejects.toThrow();
+    await expect(fs.access(path.join(repoPath, ".bugcapsule", "reports", created.capsuleId, "report.json"))).rejects.toThrow();
 
     const capsuleCustomerAddressPath = path.join(
       created.capsulePath,

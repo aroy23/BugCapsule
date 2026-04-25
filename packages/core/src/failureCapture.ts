@@ -8,11 +8,11 @@ import type { CapturedFailure } from "./types.js";
 export async function captureFailure(repoPath: string, command: string, capsuleId: string): Promise<CapturedFailure> {
   const result = await runShellCommand(command, repoPath);
   const combinedOutput = `${result.stderr}\n${result.stdout}`;
-  const reportsPath = path.join(repoPath, ".bugcapsule", "reports", capsuleId);
+  const capturesPath = path.join(repoPath, ".bugcapsule", "captures", capsuleId);
 
-  await ensureDir(reportsPath);
-  await writeTextFile(path.join(reportsPath, "original.stdout.log"), result.stdout);
-  await writeTextFile(path.join(reportsPath, "original.stderr.log"), result.stderr);
+  await ensureDir(capturesPath);
+  await writeTextFile(path.join(capturesPath, "original.stdout.log"), result.stdout);
+  await writeTextFile(path.join(capturesPath, "original.stderr.log"), result.stderr);
 
   return {
     command,

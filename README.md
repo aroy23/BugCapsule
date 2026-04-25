@@ -27,7 +27,39 @@ Run `npm run build` after changing the server or core package so your IDE uses t
 
 ## Quantitative Evaluation
 
-BugCapsule includes a deterministic evaluator for presentation-ready before/after artifacts:
+BugCapsule can write a deterministic presentation artifact after `bugcapsule_apply_patch` succeeds:
+
+```text
+.bugcapsule/evaluations/<capsule-id>/evaluation.html
+```
+
+Evaluation is opt-in. It does not run unless evaluation fields are supplied. Pass the evaluation pricing fields when applying the capsule patch:
+
+```json
+{
+  "repoPath": "/absolute/path/to/target-repo",
+  "capsuleId": "bc_example",
+  "verify": true,
+  "inputPricePerMillion": 2.50,
+  "outputPricePerMillion": 10.00
+}
+```
+
+For non-OpenAI model labels, provide a deterministic local tokenizer encoding too:
+
+```json
+{
+  "repoPath": "/absolute/path/to/target-repo",
+  "capsuleId": "bc_example",
+  "verify": true,
+  "evaluationModel": "claude-opus-4-7",
+  "evaluationEncoding": "o200k_base",
+  "inputPricePerMillion": 5.00,
+  "outputPricePerMillion": 25.00
+}
+```
+
+The evaluator can still be run manually if needed:
 
 ```bash
 npm run eval:capsule -- \
@@ -38,12 +70,7 @@ npm run eval:capsule -- \
   --output-price-per-million 10.00
 ```
 
-The evaluator writes:
-
-- `.bugcapsule/evaluations/<capsule-id>/evaluation.json`
-- `.bugcapsule/evaluations/<capsule-id>/evaluation.md`
-- `.bugcapsule/evaluations/<capsule-id>/evaluation.html`
-- `.bugcapsule/evaluations/<capsule-id>/evaluation.svg`
+The evaluator writes only `evaluation.html`.
 
 The default visualization compares:
 

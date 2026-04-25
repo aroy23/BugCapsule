@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -83,7 +85,12 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         maxDepth: z.number().positive().optional(),
         includeGlobs: z.array(z.string()).optional(),
         excludeGlobs: z.array(z.string()).optional(),
-        verifyCapsule: z.boolean().default(true)
+        verifyCapsule: z.boolean().default(true),
+        generateEvaluation: z.boolean().optional(),
+        evaluationModel: z.string().default("gpt-4o"),
+        evaluationEncoding: z.string().optional(),
+        inputPricePerMillion: z.number().nonnegative().optional(),
+        outputPricePerMillion: z.number().nonnegative().optional()
       }
     },
     async (args) => {
@@ -124,11 +131,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         agentWorkflow: buildAgentWorkflow(result),
         applyPatchToolCall: {
           tool: "bugcapsule_apply_patch",
-          arguments: {
-            repoPath: args.repoPath,
-            capsuleId: result.capsuleId,
-            verify: true
-          }
+          arguments: applyPatchArguments(args, result.capsuleId)
         },
         nextAgentInstruction: `Open ${result.capsulePath}, read README.md and capsule.json, run ${result.manifest.capsule.runCommand}, fix the failing behavior only inside the capsule, rerun ${result.manifest.capsule.runCommand}, then call bugcapsule_apply_patch with verify=true.`
       });
@@ -154,7 +157,12 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         maxDepth: z.number().positive().optional(),
         includeGlobs: z.array(z.string()).optional(),
         excludeGlobs: z.array(z.string()).optional(),
-        verifyCapsule: z.boolean().default(true)
+        verifyCapsule: z.boolean().default(true),
+        generateEvaluation: z.boolean().optional(),
+        evaluationModel: z.string().default("gpt-4o"),
+        evaluationEncoding: z.string().optional(),
+        inputPricePerMillion: z.number().nonnegative().optional(),
+        outputPricePerMillion: z.number().nonnegative().optional()
       }
     },
     async (args) => {
@@ -187,11 +195,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         agentWorkflow: buildAgentWorkflow(result),
         applyPatchToolCall: {
           tool: "bugcapsule_apply_patch",
-          arguments: {
-            repoPath: args.repoPath,
-            capsuleId: result.capsuleId,
-            verify: true
-          }
+          arguments: applyPatchArguments(args, result.capsuleId)
         },
         nextAgentInstruction: `Open ${result.capsulePath}, read README.md and capsule.json, run ${result.manifest.capsule.runCommand}, fix the failing behavior only inside the capsule, rerun ${result.manifest.capsule.runCommand}, then call bugcapsule_apply_patch with verify=true.`
       });
@@ -268,16 +272,43 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         capsuleId: z.string(),
         dryRun: z.boolean().default(false),
         verify: z.boolean().default(true),
-        allowDirty: z.boolean().default(false)
+        allowDirty: z.boolean().default(false),
+        generateEvaluation: z.boolean().optional(),
+        evaluationModel: z.string().default("gpt-4o"),
+        evaluationEncoding: z.string().optional(),
+        inputPricePerMillion: z.number().nonnegative().optional(),
+        outputPricePerMillion: z.number().nonnegative().optional()
       }
     },
-    async (args) => jsonResult(await applyCapsule({
-      repoPath: args.repoPath,
-      capsuleId: args.capsuleId,
-      dryRun: args.dryRun,
-      verify: args.verify,
-      allowDirty: args.allowDirty
-    }))
+    async (args) => {
+      const result = await applyCapsule({
+        repoPath: args.repoPath,
+        capsuleId: args.capsuleId,
+        dryRun: args.dryRun,
+        verify: args.verify,
+        allowDirty: args.allowDirty
+      });
+
+      const shouldGenerateEvaluation = args.generateEvaluation ?? hasEvaluationInputs(args);
+
+      if (!shouldGenerateEvaluation || args.dryRun || !result.status.startsWith("applied_")) {
+        return jsonResult(result);
+      }
+
+      const evaluation = await runEvaluation({
+        repoPath: args.repoPath,
+        capsuleId: args.capsuleId,
+        evaluationModel: args.evaluationModel,
+        ...(args.evaluationEncoding ? { evaluationEncoding: args.evaluationEncoding } : {}),
+        ...(args.inputPricePerMillion !== undefined ? { inputPricePerMillion: args.inputPricePerMillion } : {}),
+        ...(args.outputPricePerMillion !== undefined ? { outputPricePerMillion: args.outputPricePerMillion } : {})
+      });
+
+      return jsonResult({
+        ...result,
+        evaluation
+      });
+    }
   );
 
   registerTrackedTool(
@@ -309,7 +340,7 @@ function registerResources(mcp: McpServer): void {
     template,
     {
       title: "BugCapsule capsule resources",
-      description: "Read manifest, readme, report, patch, or file-map for a capsule.",
+      description: "Read manifest, readme, patch, or file-map for a capsule.",
       mimeType: "text/plain"
     },
     async (uri, variables) => {
@@ -423,8 +454,6 @@ async function readCapsuleResource(repoPath: string, capsulePath: string, capsul
       return fs.readFile(path.join(capsulePath, "capsule.json"), "utf8");
     case "readme":
       return fs.readFile(path.join(capsulePath, "README.md"), "utf8");
-    case "report":
-      return fs.readFile(path.join(repoPath, ".bugcapsule", "reports", capsuleId, "report.md"), "utf8");
     case "patch":
       return fs.readFile(path.join(repoPath, ".bugcapsule", "patches", `${capsuleId}.patch`), "utf8");
     case "file-map": {
@@ -465,6 +494,37 @@ function buildAgentWorkflow(result: CreateCapsuleResult): Array<{
   }
 
   return buildAgentWorkflowFromManifest(result.manifest.originalRepo.rootPath, result.manifest);
+}
+
+function applyPatchArguments(args: {
+  repoPath: string;
+  generateEvaluation?: boolean;
+  evaluationModel?: string;
+  evaluationEncoding?: string;
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
+}, capsuleId: string): Record<string, unknown> {
+  return {
+    repoPath: args.repoPath,
+    capsuleId,
+    verify: true,
+    ...(args.generateEvaluation !== undefined ? { generateEvaluation: args.generateEvaluation } : {}),
+    ...(args.evaluationModel ? { evaluationModel: args.evaluationModel } : {}),
+    ...(args.evaluationEncoding ? { evaluationEncoding: args.evaluationEncoding } : {}),
+    ...(args.inputPricePerMillion !== undefined ? { inputPricePerMillion: args.inputPricePerMillion } : {}),
+    ...(args.outputPricePerMillion !== undefined ? { outputPricePerMillion: args.outputPricePerMillion } : {})
+  };
+}
+
+function hasEvaluationInputs(args: {
+  evaluationModel?: string;
+  evaluationEncoding?: string;
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
+}): boolean {
+  return Boolean(args.evaluationModel || args.evaluationEncoding) ||
+    args.inputPricePerMillion !== undefined ||
+    args.outputPricePerMillion !== undefined;
 }
 
 function buildAgentWorkflowFromManifest(repoPath: string, manifest: BugCapsuleManifest): Array<{
@@ -515,4 +575,120 @@ function editableFiles(manifest: BugCapsuleManifest): string[] {
   return manifest.files
     .filter((file) => file.editable && file.originalPath)
     .map((file) => file.capsulePath);
+}
+
+type EvaluationOptions = {
+  repoPath: string;
+  capsuleId: string;
+  evaluationModel: string;
+  evaluationEncoding?: string;
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
+};
+
+type EvaluationResult = {
+  status: "created" | "failed";
+  htmlPath?: string;
+  command: string;
+  message?: string;
+  stderr?: string;
+};
+
+async function runEvaluation(options: EvaluationOptions): Promise<EvaluationResult> {
+  const bugCapsuleRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+  const tsxBin = path.join(bugCapsuleRoot, "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
+  const args = [
+    path.join(bugCapsuleRoot, "scripts", "evaluateCapsule.ts"),
+    "--repo",
+    options.repoPath,
+    "--capsule-id",
+    options.capsuleId,
+    "--model",
+    options.evaluationModel
+  ];
+
+  if (options.evaluationEncoding) {
+    args.push("--encoding", options.evaluationEncoding);
+  }
+  if (options.inputPricePerMillion !== undefined) {
+    args.push("--input-price-per-million", String(options.inputPricePerMillion));
+  }
+  if (options.outputPricePerMillion !== undefined) {
+    args.push("--output-price-per-million", String(options.outputPricePerMillion));
+  }
+
+  const command = `${tsxBin} ${args.map(shellQuote).join(" ")}`;
+  const result = await runProcess(tsxBin, args, bugCapsuleRoot);
+
+  if (result.exitCode !== 0) {
+    return {
+      status: "failed",
+      command,
+      message: "BugCapsule applied the patch, but automatic evaluation failed.",
+      stderr: result.stderr.trim()
+    };
+  }
+
+  const parsed = parseEvaluationOutput(result.stdout);
+
+  if (!parsed?.htmlPath) {
+    return {
+      status: "failed",
+      command,
+      message: "BugCapsule applied the patch, but evaluation did not return an HTML path.",
+      stderr: result.stderr.trim()
+    };
+  }
+
+  return {
+    status: "created",
+    htmlPath: parsed.htmlPath,
+    command
+  };
+}
+
+function runProcess(command: string, args: string[], cwd: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd,
+      env: process.env
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", (error) => {
+      stderr += `\n${error.message}`;
+    });
+    child.on("close", (code) => {
+      resolve({
+        exitCode: code ?? 1,
+        stdout,
+        stderr
+      });
+    });
+  });
+}
+
+function parseEvaluationOutput(stdout: string): { htmlPath?: string } | undefined {
+  const match = stdout.match(/\{[\s\S]*\}\s*$/);
+
+  if (!match) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(match[0]) as { htmlPath?: string };
+  } catch {
+    return undefined;
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
