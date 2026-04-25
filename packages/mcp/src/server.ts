@@ -35,9 +35,9 @@ function registerTools(mcp: McpServer): void {
     {
       title: "Suggest BugCapsule Repro Command",
       description: [
-        "Call this when the user reports a website/runtime bug but does not know the failing command.",
+        "Call this when the user gives a repo path plus a vague bug description, visible error, or URL, but no confirmed failing command.",
         "It inspects package scripts, test names, runtime repro scripts, and related source paths, then returns candidate commands or a workflow to create one.",
-        "If a candidate command fails with the same bug, call bugcapsule_create_from_command with that command."
+        "If a URL is present, prefer bugcapsule_create_from_runtime. If only a description is present, use this tool to disambiguate before asking for more context."
       ].join(" "),
       inputSchema: {
         repoPath: z.string(),
@@ -182,34 +182,6 @@ function registerTools(mcp: McpServer): void {
           }
         },
         nextAgentInstruction: `Open ${result.capsulePath}, read README.md and capsule.json, run ${result.manifest.capsule.runCommand}, fix the failing behavior only inside the capsule, rerun ${result.manifest.capsule.runCommand}, then call bugcapsule_apply_patch with verify=true.`
-      });
-    }
-  );
-
-  mcp.registerTool(
-    "bugcapsule_create_from_playwright_trace",
-    {
-      title: "Create BugCapsule From Playwright Trace",
-      description: "MVP placeholder for creating capsules from Playwright trace metadata.",
-      inputSchema: {
-        repoPath: z.string(),
-        tracePath: z.string(),
-        bugDescription: z.string().optional(),
-        routeHint: z.string().optional(),
-        maxFiles: z.number().positive().optional()
-      }
-    },
-    async (args) => {
-      const tracePath = path.isAbsolute(args.tracePath) ? args.tracePath : path.join(args.repoPath, args.tracePath);
-      const stat = await fs.stat(tracePath);
-
-      return jsonResult({
-        status: "unsupported_mvp",
-        tracePath,
-        traceBytes: stat.size,
-        bugDescription: args.bugDescription ?? "",
-        routeHint: args.routeHint ?? "",
-        message: "Playwright trace input is registered for MCP compatibility, but the demo MVP creates capsules from failing commands."
       });
     }
   );

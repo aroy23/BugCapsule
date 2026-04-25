@@ -51,7 +51,7 @@ function runtimeProbeCandidates(options: SuggestReproOptions): ReproCandidate[] 
 
   return [
     {
-      command: `bugcapsule create-runtime --url ${options.url}`,
+      command: `MCP tool: bugcapsule_create_from_runtime`,
       kind: "runtime_probe",
       confidence: 0.82,
       reason: "A runtime URL was provided, so BugCapsule can probe page interactions and generate a capsule without a pre-existing test command.",
@@ -92,7 +92,7 @@ async function testCandidates(
         ? `Test file name matches bug terms: ${normalized}`
         : `Existing test can be tried as a repro: ${normalized}`,
       canCreateCapsule: true,
-      nextAction: "Run this command. If it fails with the observed bug, call bugcapsule_create_from_command with it."
+      nextAction: "Run this command to confirm it fails with the observed bug, then call the MCP tool bugcapsule_create_from_command with it."
     };
   });
 }
@@ -113,7 +113,7 @@ function packageScriptCandidates(packageJson: PackageJson, tokens: Set<string>):
           ? `Package script is explicitly named as a repro: ${name}`
           : `Package script may exercise the bug path: ${name}`,
         canCreateCapsule: true,
-        nextAction: "Run this command. If it fails with the observed bug, call bugcapsule_create_from_command with it."
+        nextAction: "Run this command to confirm it fails with the observed bug, then call the MCP tool bugcapsule_create_from_command with it."
       };
     });
 }
@@ -129,7 +129,7 @@ function devServerCandidates(packageJson: PackageJson, options: SuggestReproOpti
         ? `Use this to run the app while reproducing ${options.url}.`
         : "Use this to run the app while reproducing the bug in a browser.",
       canCreateCapsule: false,
-      nextAction: "Start the app, reproduce the bug in the browser, capture the error text/stack, then create or identify a failing test/repro command."
+      nextAction: "Start the app, reproduce the bug in the browser, capture the error text/stack, then call bugcapsule_create_from_runtime if a local URL is available or identify a failing command."
     }));
 }
 
@@ -192,7 +192,7 @@ function buildWorkflow(
       {
         step: 3,
         action: "create_capsule",
-        detail: "Call bugcapsule_create_from_command with the confirmed failing command."
+        detail: "Call the MCP tool bugcapsule_create_from_command with the confirmed failing command."
       },
       {
         step: 4,
@@ -217,15 +217,15 @@ function buildWorkflow(
     },
     {
       step: 3,
-      action: "create_repro_command",
-      detail: relatedFiles.length > 0
+        action: "create_repro_command",
+        detail: relatedFiles.length > 0
         ? `Use the related files as starting points: ${relatedFiles.map((file) => file.path).join(", ")}`
         : "Add a small failing test or scripts/reproduce-<bug>.ts that triggers the same runtime error."
     },
     {
       step: 4,
       action: "create_capsule",
-      detail: "Once that repro command fails, call bugcapsule_create_from_command with it."
+      detail: "Once that repro command fails, call the MCP tool bugcapsule_create_from_command with it."
     }
   ];
 }

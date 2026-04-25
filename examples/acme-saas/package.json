@@ -11,7 +11,6 @@
     "redis": "^5.10.0"
   },
   "devDependencies": {
-    "@bugcapsule/cli": "file:../../packages/cli",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
   }

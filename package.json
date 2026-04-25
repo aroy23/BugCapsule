@@ -5,11 +5,12 @@
   "type": "module",
   "description": "Shrink real bugs into tiny executable repos AI coding agents can fix.",
   "workspaces": [
-    "packages/*",
+    "packages/core",
+    "packages/mcp",
     "examples/acme-saas"
   ],
   "scripts": {
-    "build": "npm run build --workspace @bugcapsule/core && npm run build --workspace @bugcapsule/skill && npm run build --workspace @bugcapsule/cli && npm run build --workspace @bugcapsule/mcp && npm run build --workspace acme-saas",
+    "build": "npm run build --workspace @bugcapsule/core && npm run build --workspace @bugcapsule/mcp && npm run build --workspace acme-saas",
     "clean": "rm -rf packages/*/dist examples/acme-saas/dist",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
