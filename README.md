@@ -25,75 +25,6 @@ node -e 'console.log(require("node:path").resolve("packages/mcp/dist/server.js")
 
 Run `npm run build` after changing the server or core package so your IDE uses the latest `dist` files.
 
-## Quantitative Evaluation
-
-BugCapsule can write a deterministic presentation artifact after `bugcapsule_apply_patch` succeeds:
-
-```text
-.bugcapsule/evaluations/<capsule-id>/evaluation.html
-```
-
-Evaluation is opt-in. It does not run unless evaluation fields are supplied. The evaluation config must be complete: `evaluationModel`, `inputPricePerMillion`, and `outputPricePerMillion` are required. Pass the evaluation pricing fields when applying the capsule patch:
-
-```json
-{
-  "repoPath": "/absolute/path/to/target-repo",
-  "capsuleId": "bc_example",
-  "verify": true,
-  "inputPricePerMillion": 2.50,
-  "outputPricePerMillion": 10.00
-}
-```
-
-For non-OpenAI model labels, provide a deterministic local tokenizer encoding too:
-
-```json
-{
-  "repoPath": "/absolute/path/to/target-repo",
-  "capsuleId": "bc_example",
-  "verify": true,
-  "evaluationModel": "claude-opus-4-7",
-  "evaluationEncoding": "o200k_base",
-  "inputPricePerMillion": 5.00,
-  "outputPricePerMillion": 25.00
-}
-```
-
-The evaluator can still be run manually if needed:
-
-```bash
-npm run eval:capsule -- \
-  --repo /absolute/path/to/target-repo \
-  --capsule-id bc_example \
-  --model gpt-4o \
-  --input-price-per-million 2.50 \
-  --output-price-per-million 10.00
-```
-
-The evaluator writes only `evaluation.html`.
-
-The default visualization compares:
-
-- full-repo text context without BugCapsule
-- generated capsule context with BugCapsule
-- exact tokenizer counts for the configured OpenAI-compatible model or encoding
-- listed-price input-context cost, when pricing is supplied
-
-This is intentionally a context/cost baseline, not an inferred no-BugCapsule agent run. Exact fix cost without BugCapsule cannot be derived from a BugCapsule run. To compare actual fix cost, run the same instrumented agent twice: once on the original repo without BugCapsule and once through BugCapsule, then pass exact provider or harness usage JSON:
-
-```bash
-npm run eval:capsule -- \
-  --repo /absolute/path/to/target-repo \
-  --capsule-id bc_example \
-  --model gpt-4o \
-  --input-price-per-million 2.50 \
-  --output-price-per-million 10.00 \
-  --baseline-usage /path/to/no-bugcapsule-usage.json \
-  --bugcapsule-usage /path/to/bugcapsule-usage.json
-```
-
-The MCP session summaries under `.bugcapsule/logs` are only approximate MCP tool payload logs. They do not observe the IDE or provider's actual model prompt/completion usage and should not be used as exact evaluation evidence.
-
 ## Add BugCapsule To An MCP IDE
 
 BugCapsule runs as a stdio MCP server. The important configuration is always:
@@ -233,3 +164,25 @@ Description-only ambiguity handling exists, but it cannot always create a capsul
 - `bugcapsule_run`: run a capsule repro through MCP.
 - `bugcapsule_verify`: rerun capsule and original verification checks.
 - `bugcapsule_apply_patch`: apply changed capsule files back to the original repo.
+
+## Evaluation Prompt Add-On
+
+BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html` after `bugcapsule_apply_patch`. Evaluation is opt-in and requires complete pricing/model info. Add this to your BugCapsule prompt when you want the HTML:
+
+```text
+When applying the patch, generate evaluation with:
+evaluationModel: claude-opus-4-7
+evaluationEncoding: o200k_base
+inputPricePerMillion: 5.00
+outputPricePerMillion: 25.00
+```
+
+Modify `evaluationModel`, `inputPricePerMillion`, and `outputPricePerMillion` for the model and pricing you want to present. Modify `evaluationEncoding` when you need a different local tokenizer. Supported `js-tiktoken` encodings in this repo include:
+
+- `o200k_base`
+- `cl100k_base`
+- `p50k_base`
+- `r50k_base`
+- `gpt2`
+
+For Claude models, `evaluationEncoding` is a deterministic local proxy, not exact Claude tokenization.
