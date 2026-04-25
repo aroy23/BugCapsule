@@ -17,10 +17,10 @@ npm run build
 npm test
 ```
 
-The local MCP server entry point is:
+The local MCP server entry point is `packages/mcp/dist/server.js`. Use an absolute path in IDE config. From the BugCapsule repo root, print it with:
 
-```text
-/Users/arnav/Desktop/BugCapsule/packages/mcp/dist/server.js
+```bash
+node -e 'console.log(require("node:path").resolve("packages/mcp/dist/server.js"))'
 ```
 
 Run `npm run build` after changing the server or core package so your IDE uses the latest `dist` files.
@@ -33,7 +33,7 @@ BugCapsule runs as a stdio MCP server. The important configuration is always:
 {
   "command": "node",
   "args": [
-    "/Users/arnav/Desktop/BugCapsule/packages/mcp/dist/server.js"
+    "/absolute/path/to/BugCapsule/packages/mcp/dist/server.js"
   ]
 }
 ```
@@ -48,7 +48,7 @@ Open `Settings` -> `Tools` -> `Windsurf Settings` -> `Add Server`, then use the 
     "bugcapsule": {
       "command": "node",
       "args": [
-        "/Users/arnav/Desktop/BugCapsule/packages/mcp/dist/server.js"
+        "/absolute/path/to/BugCapsule/packages/mcp/dist/server.js"
       ]
     }
   }
@@ -69,7 +69,7 @@ Add the same `mcpServers` entry to your Cursor MCP config. For a project-local c
     "bugcapsule": {
       "command": "node",
       "args": [
-        "/Users/arnav/Desktop/BugCapsule/packages/mcp/dist/server.js"
+        "/absolute/path/to/BugCapsule/packages/mcp/dist/server.js"
       ]
     }
   }
@@ -89,7 +89,7 @@ VS Code uses a `servers` object rather than `mcpServers`. Create or edit `.vscod
       "type": "stdio",
       "command": "node",
       "args": [
-        "/Users/arnav/Desktop/BugCapsule/packages/mcp/dist/server.js"
+        "/absolute/path/to/BugCapsule/packages/mcp/dist/server.js"
       ]
     }
   }
