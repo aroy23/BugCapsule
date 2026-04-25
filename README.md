@@ -17,4 +17,7 @@ npm install
 npm run build
 npm test
 bash scripts/e2e-demo.sh
+npm run demo:visual
 ```
+
+The visual demo writes a browser report to `.tmp/visual-demo/report.html`.

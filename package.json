@@ -14,7 +14,8 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "demo": "bash scripts/e2e-demo.sh"
+    "demo": "bash scripts/e2e-demo.sh",
+    "demo:visual": "node scripts/visual-demo.mjs"
   },
   "engines": {
     "node": ">=20"
