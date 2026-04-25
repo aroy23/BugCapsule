@@ -114,6 +114,40 @@ export type CreateCapsuleOptions = {
   outputFormat?: "text" | "json";
 };
 
+export type SuggestReproOptions = {
+  repoPath: string;
+  bugDescription?: string;
+  url?: string;
+  errorText?: string;
+};
+
+export type ReproCandidate = {
+  command: string;
+  kind: "test" | "runtime_script" | "package_script" | "dev_server" | "manual_browser";
+  confidence: number;
+  reason: string;
+  canCreateCapsule: boolean;
+  nextAction: string;
+};
+
+export type SuggestReproResult = {
+  status: "ready" | "needs_repro";
+  repoPath: string;
+  bugDescription?: string;
+  url?: string;
+  candidates: ReproCandidate[];
+  relatedFiles: Array<{
+    path: string;
+    reason: string;
+    score: number;
+  }>;
+  agentWorkflow: Array<{
+    step: number;
+    action: string;
+    detail: string;
+  }>;
+};
+
 export type CreateCapsuleResult = {
   capsuleId: string;
   capsulePath: string;

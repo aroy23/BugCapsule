@@ -38,24 +38,28 @@ repoPath: /path/to/repo
 command: npm test -- checkout-missing-shipping-address
 \`\`\`
 
+If the user only describes a website/runtime bug and does not know a failing command, call \`bugcapsule_suggest_repro\` with the repo path, bug description, URL if available, and any visible error text. Try the highest-confidence candidate command it returns. If that command fails with the same bug, call \`bugcapsule_create_from_command\`.
+
 ## Workflow
 
 1. Check that the BugCapsule MCP server is available.
-2. If there is a failing command, call \`bugcapsule_create_from_command\` immediately.
-3. If there is a Playwright trace, call \`bugcapsule_create_from_playwright_trace\`.
-4. Follow the \`agentWorkflow\` returned by the tool response.
-5. Open the generated capsule path.
-6. Read \`README.md\` and \`capsule.json\`.
-7. Run the capsule repro command.
-8. Fix the failing capsule test.
-9. Run the capsule repro command again.
-10. Call \`bugcapsule_apply_patch\` with \`verify=true\`.
-11. Summarize which original files changed and which verification checks passed.
+2. If there is no failing command, call \`bugcapsule_suggest_repro\` first.
+3. If there is a failing command, call \`bugcapsule_create_from_command\` immediately.
+4. If there is a Playwright trace, call \`bugcapsule_create_from_playwright_trace\`.
+5. Follow the \`agentWorkflow\` returned by the tool response.
+6. Open the generated capsule path.
+7. Read \`README.md\` and \`capsule.json\`.
+8. Run the capsule repro command.
+9. Fix the failing capsule test.
+10. Run the capsule repro command again.
+11. Call \`bugcapsule_apply_patch\` with \`verify=true\`.
+12. Summarize which original files changed and which verification checks passed.
 
 ## Rules
 
 - Do not edit unrelated original repo files before creating a capsule unless the user explicitly asks.
 - If a failing command is available, do not ask the user to restate the workflow.
+- If no failing command is available, use \`bugcapsule_suggest_repro\` before normal broad code search.
 - Do not delete capsule metadata.
 - Prefer fixing the smallest root cause inside the capsule.
 - After the capsule passes, always apply through BugCapsule rather than manually copying code back.

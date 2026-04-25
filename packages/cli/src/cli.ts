@@ -9,6 +9,7 @@ import {
   inspectCapsule,
   listCapsules,
   runCapsule,
+  suggestRepro,
   verifyCapsule,
   type CreateCapsuleResult
 } from "@bugcapsule/core";
@@ -85,6 +86,55 @@ program
       }
 
       printCreateResult(result);
+    });
+  });
+
+program
+  .command("suggest")
+  .description("Suggest repro commands from a bug description before creating a capsule.")
+  .option("--bug <description>", "User-visible bug description")
+  .option("--url <url>", "Affected app URL")
+  .option("--error <text>", "Observed error text or stack")
+  .option("--json", "Print machine-readable JSON")
+  .action(async (options: {
+    bug?: string;
+    url?: string;
+    error?: string;
+    json?: boolean;
+  }) => {
+    await runCli(async () => {
+      const result = await suggestRepro({
+        repoPath: process.cwd(),
+        ...(options.bug ? { bugDescription: options.bug } : {}),
+        ...(options.url ? { url: options.url } : {}),
+        ...(options.error ? { errorText: options.error } : {})
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(`BugCapsule repro suggestion: ${result.status}\n`);
+      if (result.candidates.length > 0) {
+        console.log("Candidate commands:");
+        for (const candidate of result.candidates) {
+          console.log(`- ${candidate.command} (${Math.round(candidate.confidence * 100)}%)`);
+          console.log(`  ${candidate.reason}`);
+        }
+      } else {
+        console.log("No existing failing command candidates found.");
+      }
+      if (result.relatedFiles.length > 0) {
+        console.log("\nRelated files:");
+        for (const file of result.relatedFiles) {
+          console.log(`- ${file.path}`);
+        }
+      }
+      console.log("\nNext:");
+      for (const step of result.agentWorkflow) {
+        console.log(`${step.step}. ${step.detail}`);
+      }
     });
   });
 

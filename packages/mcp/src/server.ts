@@ -11,6 +11,7 @@ import {
   inspectCapsule,
   listCapsules,
   runCapsule,
+  suggestRepro,
   verifyCapsule,
   type BugCapsuleManifest,
   type CreateCapsuleResult
@@ -29,11 +30,35 @@ await server.connect(new StdioServerTransport());
 
 function registerTools(mcp: McpServer): void {
   mcp.registerTool(
+    "bugcapsule_suggest_repro",
+    {
+      title: "Suggest BugCapsule Repro Command",
+      description: [
+        "Call this when the user reports a website/runtime bug but does not know the failing command.",
+        "It inspects package scripts, test names, runtime repro scripts, and related source paths, then returns candidate commands or a workflow to create one.",
+        "If a candidate command fails with the same bug, call bugcapsule_create_from_command with that command."
+      ].join(" "),
+      inputSchema: {
+        repoPath: z.string(),
+        bugDescription: z.string().optional(),
+        url: z.string().optional(),
+        errorText: z.string().optional()
+      }
+    },
+    async (args) => jsonResult(await suggestRepro({
+      repoPath: args.repoPath,
+      ...(args.bugDescription ? { bugDescription: args.bugDescription } : {}),
+      ...(args.url ? { url: args.url } : {}),
+      ...(args.errorText ? { errorText: args.errorText } : {})
+    }))
+  );
+
+  mcp.registerTool(
     "bugcapsule_create_from_command",
     {
       title: "Start BugCapsule Debugging From Failing Command",
       description: [
-        "Call this first whenever the user asks BugCapsule to isolate, shrink, or fix a bug and provides a failing command.",
+        "Call this first whenever the user asks BugCapsule to isolate, shrink, or fix a bug and provides a failing command. If the user does not know a failing command, call bugcapsule_suggest_repro first.",
         "This tool runs the failing command, creates a minimized executable capsule, and returns the exact next workflow for the agent.",
         "After this tool succeeds, do not ask the user for more BugCapsule steps: open the capsulePath, fix only the capsule, rerun its runCommand, then call bugcapsule_apply_patch with verify=true."
       ].join(" "),

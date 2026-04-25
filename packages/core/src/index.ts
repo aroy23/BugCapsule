@@ -6,6 +6,7 @@ export { inspectCapsule, listCapsules } from "./inspectCapsule.js";
 export { detectProject } from "./projectDetector.js";
 export { defineConfig } from "./config.js";
 export { initBugCapsule } from "./initProject.js";
+export { suggestRepro } from "./suggestRepro.js";
 
 export type {
   ApplyCapsuleOptions,
@@ -27,6 +28,9 @@ export type {
   RunCapsuleOptions,
   RunCapsuleResult,
   StackFrame,
+  ReproCandidate,
+  SuggestReproOptions,
+  SuggestReproResult,
   VerifyCapsuleOptions,
   VerifyCapsuleResult
 } from "./types.js";
