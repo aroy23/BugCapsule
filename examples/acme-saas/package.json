@@ -1,0 +1,18 @@
+{
+  "name": "acme-saas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "redis": "^5.10.0"
+  },
+  "devDependencies": {
+    "@bugcapsule/cli": "file:../../packages/cli",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  }
+}

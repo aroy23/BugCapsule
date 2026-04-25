@@ -1,0 +1,27 @@
+{
+  "name": "bugcapsule",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shrink real bugs into tiny executable repos AI coding agents can fix.",
+  "workspaces": [
+    "packages/*",
+    "examples/acme-saas"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @bugcapsule/core && npm run build --workspace @bugcapsule/skill && npm run build --workspace @bugcapsule/cli && npm run build --workspace @bugcapsule/mcp && npm run build --workspace acme-saas",
+    "clean": "rm -rf packages/*/dist examples/acme-saas/dist",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  }
+}
