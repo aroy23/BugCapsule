@@ -1,11 +1,4 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-
-export type SkillTarget = "agents" | "windsurf";
-
-export const skillName = "bugcapsule";
-
-export const skillMarkdown = `---
+---
 name: bugcapsule
 description: >
   Use BugCapsule when debugging a failing test, vague bug report, flaky reproduction,
@@ -29,14 +22,14 @@ Use this skill when:
 ## Workflow
 
 1. Check that the BugCapsule MCP server is available.
-2. If there is a failing command, call \`bugcapsule_create_from_command\`.
-3. If there is a Playwright trace, call \`bugcapsule_create_from_playwright_trace\`.
+2. If there is a failing command, call `bugcapsule_create_from_command`.
+3. If there is a Playwright trace, call `bugcapsule_create_from_playwright_trace`.
 4. Open the generated capsule path.
-5. Read \`README.md\` and \`capsule.json\`.
+5. Read `README.md` and `capsule.json`.
 6. Run the capsule repro command.
 7. Fix the failing capsule test.
 8. Run the capsule repro command again.
-9. Call \`bugcapsule_apply_patch\` with \`verify=true\`.
+9. Call `bugcapsule_apply_patch` with `verify=true`.
 10. Summarize which original files changed and which verification checks passed.
 
 ## Rules
@@ -49,25 +42,10 @@ Use this skill when:
 
 ## Useful commands
 
-\`\`\`bash
+```bash
 npx bugcapsule create -- npm test -- <test-name>
 npx bugcapsule list
 npx bugcapsule inspect <capsule-id>
 npx bugcapsule run <capsule-id>
 npx bugcapsule apply <capsule-id> --verify
-\`\`\`
-`;
-
-export async function installSkill(options: {
-  repoPath: string;
-  target: SkillTarget;
-}): Promise<{ targetPath: string }> {
-  const targetPath = path.join(options.repoPath, targetDirectory(options.target), "bugcapsule", "SKILL.md");
-  await fs.mkdir(path.dirname(targetPath), { recursive: true });
-  await fs.writeFile(targetPath, skillMarkdown);
-  return { targetPath };
-}
-
-export function targetDirectory(target: SkillTarget): ".agents/skills" | ".windsurf/skills" {
-  return target === "agents" ? ".agents/skills" : ".windsurf/skills";
-}
+```
