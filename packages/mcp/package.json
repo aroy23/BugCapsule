@@ -9,10 +9,11 @@
     "bugcapsule-mcp": "./dist/server.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "pricing.json"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('pricing.json','dist/pricing.json')\"",
     "test": "vitest run"
   },
   "dependencies": {

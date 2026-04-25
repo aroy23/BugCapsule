@@ -1,0 +1,6 @@
+{
+  "model": "claude-sonnet",
+  "currency": "USD",
+  "input_per_million": 3,
+  "output_per_million": 15
+}

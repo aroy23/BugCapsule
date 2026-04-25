@@ -18,19 +18,27 @@ import {
   type CreateCapsuleResult
 } from "@bugcapsule/core";
 
+import { SessionTracker } from "./usage/sessionTracker.js";
+import { registerTrackedTool } from "./usage/wrapTool.js";
+
 const server = new McpServer({
   name: "bugcapsule",
   version: "0.1.0"
 });
 
-registerTools(server);
+const tracker = new SessionTracker();
+
+registerTools(server, tracker);
 registerResources(server);
 registerPrompts(server);
+registerShutdownHooks(tracker);
 
 await server.connect(new StdioServerTransport());
 
-function registerTools(mcp: McpServer): void {
-  mcp.registerTool(
+function registerTools(mcp: McpServer, tracker: SessionTracker): void {
+  registerTrackedTool(
+    mcp,
+    tracker,
     "bugcapsule_suggest_repro",
     {
       title: "Suggest BugCapsule Repro Command",
@@ -54,7 +62,9 @@ function registerTools(mcp: McpServer): void {
     }))
   );
 
-  mcp.registerTool(
+  registerTrackedTool(
+    mcp,
+    tracker,
     "bugcapsule_create_from_runtime",
     {
       title: "Create BugCapsule From Runtime Symptom",
@@ -125,7 +135,9 @@ function registerTools(mcp: McpServer): void {
     }
   );
 
-  mcp.registerTool(
+  registerTrackedTool(
+    mcp,
+    tracker,
     "bugcapsule_create_from_command",
     {
       title: "Start BugCapsule Debugging From Failing Command",
@@ -186,7 +198,9 @@ function registerTools(mcp: McpServer): void {
     }
   );
 
-  mcp.registerTool(
+  registerTrackedTool(
+    mcp,
+    tracker,
     "bugcapsule_list",
     {
       title: "List BugCapsules",
@@ -198,7 +212,9 @@ function registerTools(mcp: McpServer): void {
     async (args) => jsonResult(await listCapsules({ repoPath: args.repoPath }))
   );
 
-  mcp.registerTool(
+  registerTrackedTool(
+    mcp,
+    tracker,
     "bugcapsule_run",
     {
       title: "Run BugCapsule",
@@ -216,7 +232,9 @@ function registerTools(mcp: McpServer): void {
     }))
   );
 
-  mcp.registerTool(
+  registerTrackedTool(
+    mcp,
+    tracker,
     "bugcapsule_inspect",
     {
       title: "Inspect BugCapsule",
@@ -238,7 +256,9 @@ function registerTools(mcp: McpServer): void {
     }
   );
 
-  mcp.registerTool(
+  registerTrackedTool(
+    mcp,
+    tracker,
     "bugcapsule_apply_patch",
     {
       title: "Apply BugCapsule Patch",
@@ -260,7 +280,9 @@ function registerTools(mcp: McpServer): void {
     }))
   );
 
-  mcp.registerTool(
+  registerTrackedTool(
+    mcp,
+    tracker,
     "bugcapsule_verify",
     {
       title: "Verify BugCapsule",
@@ -378,6 +400,21 @@ function registerPrompts(mcp: McpServer): void {
       ]
     })
   );
+}
+
+function registerShutdownHooks(activeTracker: SessionTracker): void {
+  let shuttingDown = false;
+  const flush = (): void => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    void activeTracker.finalizeAll("shutdown");
+  };
+
+  process.on("beforeExit", flush);
+  process.on("SIGINT", flush);
+  process.on("SIGTERM", flush);
 }
 
 async function readCapsuleResource(repoPath: string, capsulePath: string, capsuleId: string, resource: string): Promise<string> {
