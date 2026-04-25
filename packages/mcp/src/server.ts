@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   applyCapsule,
   createCapsule,
+  createCapsuleFromRuntime,
   inspectCapsule,
   listCapsules,
   runCapsule,
@@ -54,11 +55,82 @@ function registerTools(mcp: McpServer): void {
   );
 
   mcp.registerTool(
+    "bugcapsule_create_from_runtime",
+    {
+      title: "Create BugCapsule From Runtime Symptom",
+      description: [
+        "Call this when the user reports a visual or runtime bug with broad context, such as 'this button does not work', and can provide the local page URL.",
+        "It probes same-origin interactions from the page, captures the server-side stack, generates a hidden source repro under .bugcapsule/repros, then creates an executable capsule.",
+        "After this tool succeeds, open the capsulePath, fix only the capsule, rerun its runCommand, then call bugcapsule_apply_patch with verify=true."
+      ].join(" "),
+      inputSchema: {
+        repoPath: z.string(),
+        url: z.string(),
+        bugDescription: z.string().optional(),
+        interactionHint: z.string().optional(),
+        capsuleName: z.string().optional(),
+        maxFiles: z.number().positive().optional(),
+        maxDepth: z.number().positive().optional(),
+        includeGlobs: z.array(z.string()).optional(),
+        excludeGlobs: z.array(z.string()).optional(),
+        verifyCapsule: z.boolean().default(true)
+      }
+    },
+    async (args) => {
+      const result = await createCapsuleFromRuntime({
+        repoPath: args.repoPath,
+        url: args.url,
+        ...(args.bugDescription ? { bugDescription: args.bugDescription } : {}),
+        ...(args.interactionHint ? { interactionHint: args.interactionHint } : {}),
+        ...(args.capsuleName ? { capsuleName: args.capsuleName } : {}),
+        ...(args.maxFiles ? { maxFiles: args.maxFiles } : {}),
+        ...(args.maxDepth ? { maxDepth: args.maxDepth } : {}),
+        ...(args.includeGlobs ? { includeGlobs: args.includeGlobs } : {}),
+        ...(args.excludeGlobs ? { excludeGlobs: args.excludeGlobs } : {}),
+        verifyCapsule: args.verifyCapsule
+      });
+
+      if (!("capsulePath" in result)) {
+        return jsonResult(result);
+      }
+
+      return jsonResult({
+        capsuleId: result.capsuleId,
+        status: result.status,
+        capsulePath: result.capsulePath,
+        runCommand: result.manifest.capsule.runCommand,
+        capsuleReadmePath: path.join(result.capsulePath, "README.md"),
+        capsuleManifestPath: path.join(result.capsulePath, "capsule.json"),
+        discoveredFailure: result.probe.failure,
+        generatedRepro: result.generatedRepro,
+        summary: {
+          originalFileCount: result.manifest.metrics.originalFileCount,
+          capsuleFileCount: result.manifest.metrics.capsuleFileCount,
+          contextReductionPercent: result.manifest.metrics.contextReductionPercent,
+          failureMessage: result.manifest.originalRepro.failureSummary,
+          includedEditableFiles: editableFiles(result.manifest),
+          generatedMocks: result.manifest.mocks.map((mock) => mock.moduleName)
+        },
+        agentWorkflow: buildAgentWorkflow(result),
+        applyPatchToolCall: {
+          tool: "bugcapsule_apply_patch",
+          arguments: {
+            repoPath: args.repoPath,
+            capsuleId: result.capsuleId,
+            verify: true
+          }
+        },
+        nextAgentInstruction: `Open ${result.capsulePath}, read README.md and capsule.json, run ${result.manifest.capsule.runCommand}, fix the failing behavior only inside the capsule, rerun ${result.manifest.capsule.runCommand}, then call bugcapsule_apply_patch with verify=true.`
+      });
+    }
+  );
+
+  mcp.registerTool(
     "bugcapsule_create_from_command",
     {
       title: "Start BugCapsule Debugging From Failing Command",
       description: [
-        "Call this first whenever the user asks BugCapsule to isolate, shrink, or fix a bug and provides a failing command. If the user does not know a failing command, call bugcapsule_suggest_repro first.",
+        "Call this first whenever the user asks BugCapsule to isolate, shrink, or fix a bug and provides a failing command. If the user does not know a failing command but has a local URL, call bugcapsule_create_from_runtime instead.",
         "This tool runs the failing command, creates a minimized executable capsule, and returns the exact next workflow for the agent.",
         "After this tool succeeds, do not ask the user for more BugCapsule steps: open the capsulePath, fix only the capsule, rerun its runCommand, then call bugcapsule_apply_patch with verify=true."
       ].join(" "),
@@ -304,6 +376,31 @@ function registerPrompts(mcp: McpServer): void {
           content: {
             type: "text",
             text: `Use BugCapsule to fix this bug.\n\nRepo path:\n${args.repoPath}\n\nFailing command:\n${args.command}\n\nCall bugcapsule_create_from_command first. Follow the agentWorkflow returned by the tool. Fix only files inside the generated capsule until the capsule passes. Then call bugcapsule_apply_patch with verify=true and summarize the original files changed.`
+          }
+        }
+      ]
+    })
+  );
+
+  mcp.registerPrompt(
+    "bugcapsule_fix_from_runtime",
+    {
+      title: "Fix Runtime Bug With BugCapsule",
+      description: "Short workflow for using BugCapsule when the user only has a local URL and a broad visual symptom.",
+      argsSchema: {
+        repoPath: z.string(),
+        url: z.string(),
+        bugDescription: z.string()
+      }
+    },
+    (args) => ({
+      description: "Use BugCapsule to discover, isolate, and fix a runtime UI bug.",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Use BugCapsule to fix this runtime bug.\n\nRepo path:\n${args.repoPath}\n\nURL:\n${args.url}\n\nSymptom:\n${args.bugDescription}\n\nCall bugcapsule_create_from_runtime first. Follow the agentWorkflow returned by the tool. Fix only files inside the generated capsule until the capsule passes. Then call bugcapsule_apply_patch with verify=true and summarize the original files changed.`
           }
         }
       ]

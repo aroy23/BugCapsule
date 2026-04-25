@@ -4,14 +4,14 @@ import { minimatch } from "minimatch";
 
 import { defaultConfig } from "./config.js";
 import { captureFailure } from "./failureCapture.js";
-import { copyTextFile, ensureDir, hashString, isSecretPath, listProjectFiles, pathExists, readJsonFile, writeJsonFile, writeTextFile } from "./fileUtils.js";
+import { copyTextFile, ensureDir, hashFile, hashString, isSecretPath, listProjectFiles, pathExists, readJsonFile, writeTextFile } from "./fileUtils.js";
 import { createMockPlan, rewriteExternalImports } from "./mockGenerator.js";
 import { capsulePathFor, manifestRelativeLogPath, writeManifest, writeReadme, writeReport } from "./manifest.js";
 import { detectProject } from "./projectDetector.js";
 import { runShellCommand } from "./shell.js";
 import { selectSlice } from "./slicer.js";
 import { assertInsideRoot, normalizePath, slugify } from "./pathUtils.js";
-import type { BugCapsuleManifest, BugCapsuleReport, CapsuleFileMapping, CreateCapsuleOptions, CreateCapsuleResult } from "./types.js";
+import type { AdditionalCapsuleFile, BugCapsuleManifest, BugCapsuleReport, CapsuleFileMapping, CreateCapsuleOptions, CreateCapsuleResult } from "./types.js";
 
 type PackageJson = {
   name?: string;
@@ -100,6 +100,11 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
       hashAtCapture: hashString(mock.content),
       editable: false
     });
+  }
+
+  for (const file of options.additionalFiles ?? []) {
+    const mapping = await writeAdditionalCapsuleFile(repoPath, capsulePath, file);
+    fileMappings.push(mapping);
   }
 
   const packageContent = await renderCapsulePackage(repoPath, project.testRunner, capsuleId, options.command);
@@ -228,12 +233,12 @@ async function resolveCapsuleId(repoPath: string, options: CreateCapsuleOptions)
 
 async function renderCapsulePackage(repoPath: string, testRunner: string, capsuleId: string, originalCommand: string): Promise<string> {
   const sourcePackage = await readJsonFile<PackageJson>(path.join(repoPath, "package.json"));
+  const testCommand = capsuleTestScript(sourcePackage, testRunner, originalCommand);
   const devDependencies = {
     typescript: sourcePackage.devDependencies?.typescript ?? "^6.0.3",
-    vitest: sourcePackage.devDependencies?.vitest ?? "^4.1.5",
-    tsx: sourcePackage.devDependencies?.tsx ?? "^4.20.0"
+    ...(testCommand.includes("vitest") ? { vitest: sourcePackage.devDependencies?.vitest ?? "^4.1.5" } : {}),
+    ...(testCommand.includes("tsx") ? { tsx: sourcePackage.devDependencies?.tsx ?? "^4.20.0" } : {})
   };
-  const testCommand = capsuleTestScript(sourcePackage, testRunner, originalCommand);
   const packageJson = {
     name: `bugcapsule-${capsuleId}`,
     private: true,
@@ -262,14 +267,68 @@ function capsuleTestScript(sourcePackage: PackageJson, testRunner: string, origi
   }
 
   if (/^(?:npx\s+)?vitest\b|^npm\s+test\b/.test(originalCommand)) {
+    const vitestMatch = originalCommand.match(/^(?:npx\s+)?vitest(?:\s+run)?\s+(.+)$/);
+
+    if (vitestMatch?.[1]) {
+      return `vitest run ${vitestMatch[1].trim()}`;
+    }
+
     return testRunner === "jest" ? "jest" : "vitest run";
   }
 
-  if (/^(?:node|tsx)\s+/.test(originalCommand)) {
+  const tsxMatch = originalCommand.match(/^(?:npx\s+)?tsx\s+(.+)$/);
+
+  if (tsxMatch?.[1]) {
+    return `tsx ${tsxMatch[1].trim()}`;
+  }
+
+  if (/^node\s+/.test(originalCommand)) {
     return originalCommand;
   }
 
   return testRunner === "jest" ? "jest" : "vitest run";
+}
+
+async function writeAdditionalCapsuleFile(
+  repoPath: string,
+  capsulePath: string,
+  file: AdditionalCapsuleFile
+): Promise<CapsuleFileMapping> {
+  const capsuleRelative = validateRelativePath("capsulePath", file.capsulePath);
+  const targetPath = path.join(capsulePath, capsuleRelative);
+  assertInsideRoot(capsulePath, targetPath);
+  await writeTextFile(targetPath, file.content);
+
+  let originalHashAtCapture: string | undefined;
+  let originalPath = "";
+
+  if (file.originalPath) {
+    originalPath = validateRelativePath("originalPath", file.originalPath);
+    const absoluteOriginalPath = path.join(repoPath, originalPath);
+    assertInsideRoot(repoPath, absoluteOriginalPath);
+    originalHashAtCapture = await pathExists(absoluteOriginalPath)
+      ? await hashFile(absoluteOriginalPath)
+      : hashString(file.content);
+  }
+
+  return {
+    capsulePath: capsuleRelative,
+    originalPath,
+    kind: file.kind,
+    hashAtCapture: hashString(file.content),
+    ...(originalHashAtCapture ? { originalHashAtCapture } : {}),
+    editable: file.editable ?? false
+  };
+}
+
+function validateRelativePath(label: string, value: string): string {
+  const normalized = normalizePath(value);
+
+  if (path.isAbsolute(normalized) || normalized.startsWith("../") || normalized === "..") {
+    throw new Error(`${label} must be a repo-relative path.`);
+  }
+
+  return normalized;
 }
 
 function renderCapsuleTsconfig(): string {

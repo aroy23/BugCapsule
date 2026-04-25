@@ -20,7 +20,7 @@ npm test
 
 ## Using BugCapsule From An MCP Agent
 
-After configuring the local MCP server, the user prompt can be short:
+After configuring the local MCP server, the user prompt can be short. If the user has a failing command:
 
 ```text
 Use BugCapsule to fix this.
@@ -30,13 +30,13 @@ command: npm test -- checkout-missing-shipping-address
 
 The MCP tool returns an `agentWorkflow` with the capsule path, repro command, editable files, and the exact apply-back call.
 
-If the user only knows the app behavior, use the suggestion tool first:
+If the user only knows the app behavior, provide the local URL and a broad symptom:
 
 ```text
-Use BugCapsule to figure out how to reproduce this checkout bug.
+Use BugCapsule to fix this runtime bug.
 repoPath: /Users/arnav/Desktop/Demo
 url: http://localhost:4177
-bug: clicking Complete Checkout shows a missing shipping address error
+symptom: the Complete Checkout button does not work
 ```
 
-`bugcapsule_suggest_repro` ranks existing tests, repro scripts, dev-server commands, and related files so the agent can confirm a failing command before capsule creation.
+`bugcapsule_create_from_runtime` probes same-origin page interactions, captures the server stack, writes a hidden `.bugcapsule/repros/*` repro, and creates the capsule from that generated repro. `bugcapsule_suggest_repro` remains useful when the user does not know whether a command or runtime URL is available.

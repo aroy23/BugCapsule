@@ -7,8 +7,10 @@ export { detectProject } from "./projectDetector.js";
 export { defineConfig } from "./config.js";
 export { initBugCapsule } from "./initProject.js";
 export { suggestRepro } from "./suggestRepro.js";
+export { createCapsuleFromRuntime, probeRuntime } from "./runtimeDiscovery.js";
 
 export type {
+  AdditionalCapsuleFile,
   ApplyCapsuleOptions,
   ApplyCapsuleResult,
   BugCapsuleConfig,
@@ -19,6 +21,8 @@ export type {
   CapsuleMock,
   CapturedFailure,
   CreateCapsuleOptions,
+  CreateCapsuleFromRuntimeOptions,
+  CreateCapsuleFromRuntimeResult,
   CreateCapsuleResult,
   InspectCapsuleOptions,
   ListCapsulesOptions,
@@ -29,6 +33,11 @@ export type {
   RunCapsuleResult,
   StackFrame,
   ReproCandidate,
+  RuntimeFailure,
+  RuntimeGeneratedRepro,
+  RuntimeInteraction,
+  RuntimeProbeOptions,
+  RuntimeProbeResult,
   SuggestReproOptions,
   SuggestReproResult,
   VerifyCapsuleOptions,

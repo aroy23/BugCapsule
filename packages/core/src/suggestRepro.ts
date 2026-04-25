@@ -26,6 +26,7 @@ export async function suggestRepro(options: SuggestReproOptions): Promise<Sugges
   ].filter(Boolean).join(" "));
   const relatedFiles = await findRelatedFiles(repoPath, tokens);
   const candidates = rankCandidates([
+    ...runtimeProbeCandidates(options),
     ...(await testCandidates(repoPath, packageJson, tokens)),
     ...packageScriptCandidates(packageJson, tokens),
     ...devServerCandidates(packageJson, options)
@@ -41,6 +42,23 @@ export async function suggestRepro(options: SuggestReproOptions): Promise<Sugges
     relatedFiles,
     agentWorkflow: buildWorkflow(status, candidates, relatedFiles, options)
   };
+}
+
+function runtimeProbeCandidates(options: SuggestReproOptions): ReproCandidate[] {
+  if (!options.url) {
+    return [];
+  }
+
+  return [
+    {
+      command: `bugcapsule create-runtime --url ${options.url}`,
+      kind: "runtime_probe",
+      confidence: 0.82,
+      reason: "A runtime URL was provided, so BugCapsule can probe page interactions and generate a capsule without a pre-existing test command.",
+      canCreateCapsule: true,
+      nextAction: "Call bugcapsule_create_from_runtime with the URL and bug description."
+    }
+  ];
 }
 
 async function testCandidates(
@@ -138,6 +156,27 @@ function buildWorkflow(
 ): SuggestReproResult["agentWorkflow"] {
   if (status === "ready") {
     const best = candidates.find((candidate) => candidate.canCreateCapsule);
+    const runtimeProbe = candidates.find((candidate) => candidate.kind === "runtime_probe");
+
+    if (runtimeProbe && options.url) {
+      return [
+        {
+          step: 1,
+          action: "probe_runtime",
+          detail: "Call bugcapsule_create_from_runtime with the repo path, URL, and broad user-visible symptom."
+        },
+        {
+          step: 2,
+          action: "fix_capsule",
+          detail: "Open the returned capsulePath, run npm test inside the capsule, and fix only mapped capsule files."
+        },
+        {
+          step: 3,
+          action: "apply_back",
+          detail: "Call bugcapsule_apply_patch with verify=true after the capsule passes."
+        }
+      ];
+    }
 
     return [
       {

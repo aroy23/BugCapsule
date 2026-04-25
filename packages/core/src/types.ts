@@ -20,7 +20,7 @@ export type StackFrame = {
   isUserCode: boolean;
 };
 
-export type CapsuleFileKind = "source" | "test" | "fixture" | "generated_mock" | "config" | "package";
+export type CapsuleFileKind = "source" | "test" | "fixture" | "runtime_repro" | "generated_mock" | "config" | "package";
 
 export type CapsuleFileMapping = {
   capsulePath: string;
@@ -112,6 +112,15 @@ export type CreateCapsuleOptions = {
   installDependencies?: boolean;
   verifyCapsule?: boolean;
   outputFormat?: "text" | "json";
+  additionalFiles?: AdditionalCapsuleFile[];
+};
+
+export type AdditionalCapsuleFile = {
+  capsulePath: string;
+  originalPath?: string;
+  kind: CapsuleFileKind;
+  content: string;
+  editable?: boolean;
 };
 
 export type SuggestReproOptions = {
@@ -123,7 +132,7 @@ export type SuggestReproOptions = {
 
 export type ReproCandidate = {
   command: string;
-  kind: "test" | "runtime_script" | "package_script" | "dev_server" | "manual_browser";
+  kind: "test" | "runtime_probe" | "runtime_script" | "package_script" | "dev_server" | "manual_browser";
   confidence: number;
   reason: string;
   canCreateCapsule: boolean;
@@ -159,6 +168,76 @@ export type CreateCapsuleResult = {
   manifest: BugCapsuleManifest;
   report: BugCapsuleReport;
 };
+
+export type RuntimeProbeOptions = {
+  repoPath: string;
+  url: string;
+  bugDescription?: string;
+  interactionHint?: string;
+};
+
+export type RuntimeInteraction = {
+  method: string;
+  url: string;
+  source: "html_fetch" | "page_get";
+  reason: string;
+};
+
+export type RuntimeFailure = {
+  method: string;
+  url: string;
+  statusCode: number;
+  errorMessage: string;
+  stack?: string;
+  responseBody: string;
+  stackTrace: StackFrame[];
+};
+
+export type RuntimeProbeResult = {
+  status: "failure_found" | "no_failure_found" | "probe_failed";
+  repoPath: string;
+  url: string;
+  attemptedInteractions: Array<RuntimeInteraction & {
+    statusCode?: number;
+    outcome: "failure" | "passed" | "error";
+    message?: string;
+  }>;
+  failure?: RuntimeFailure;
+  relatedFiles: Array<{
+    path: string;
+    reason: string;
+  }>;
+  message?: string;
+};
+
+export type CreateCapsuleFromRuntimeOptions = Omit<CreateCapsuleOptions, "command" | "additionalFiles"> & {
+  url: string;
+  bugDescription?: string;
+  interactionHint?: string;
+};
+
+export type RuntimeGeneratedRepro = {
+  path: string;
+  command: string;
+  targetExport: {
+    file: string;
+    name: string;
+  };
+  inputSource: string;
+};
+
+export type CreateCapsuleFromRuntimeResult =
+  | {
+    status: "runtime_probe_failed" | "no_runtime_failure_found" | "runtime_repro_unavailable";
+    repoPath: string;
+    url: string;
+    message: string;
+    probe: RuntimeProbeResult;
+  }
+  | (CreateCapsuleResult & {
+    probe: RuntimeProbeResult;
+    generatedRepro: RuntimeGeneratedRepro;
+  });
 
 export type RunCapsuleOptions = {
   repoPath: string;

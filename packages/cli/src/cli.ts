@@ -5,6 +5,7 @@ import { Command } from "commander";
 import {
   applyCapsule,
   createCapsule,
+  createCapsuleFromRuntime,
   initBugCapsule,
   inspectCapsule,
   listCapsules,
@@ -135,6 +136,68 @@ program
       for (const step of result.agentWorkflow) {
         console.log(`${step.step}. ${step.detail}`);
       }
+    });
+  });
+
+program
+  .command("create-runtime")
+  .description("Create a capsule from a local runtime URL and broad bug description.")
+  .requiredOption("--url <url>", "Affected local app URL")
+  .option("--bug <description>", "User-visible bug description")
+  .option("--hint <text>", "Interaction hint, such as a button label")
+  .option("--id <id>", "Optional capsule id")
+  .option("--name <name>", "Human-readable capsule name")
+  .option("--max-files <n>", "Maximum files to include", parsePositiveInteger)
+  .option("--max-depth <n>", "Maximum import depth", parsePositiveInteger)
+  .option("--include <glob>", "Force include glob", collect, [])
+  .option("--exclude <glob>", "Force exclude glob", collect, [])
+  .option("--no-install", "Do not install capsule dependencies")
+  .option("--no-run", "Do not verify capsule after creation")
+  .option("--json", "Print machine-readable JSON")
+  .action(async (options: {
+    url: string;
+    bug?: string;
+    hint?: string;
+    id?: string;
+    name?: string;
+    maxFiles?: number;
+    maxDepth?: number;
+    include: string[];
+    exclude: string[];
+    install: boolean;
+    run: boolean;
+    json?: boolean;
+  }) => {
+    await runCli(async () => {
+      const result = await createCapsuleFromRuntime({
+        repoPath: process.cwd(),
+        url: options.url,
+        ...(options.bug ? { bugDescription: options.bug } : {}),
+        ...(options.hint ? { interactionHint: options.hint } : {}),
+        ...(options.id ? { capsuleId: options.id } : {}),
+        ...(options.name ? { capsuleName: options.name } : {}),
+        ...(options.maxFiles ? { maxFiles: options.maxFiles } : {}),
+        ...(options.maxDepth ? { maxDepth: options.maxDepth } : {}),
+        includeGlobs: options.include,
+        excludeGlobs: options.exclude,
+        installDependencies: options.install,
+        verifyCapsule: options.run
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      if (!("capsulePath" in result)) {
+        console.log(`BugCapsule runtime discovery: ${result.status}`);
+        console.log(result.message);
+        return;
+      }
+
+      console.log(`Discovered runtime failure: ${result.probe.failure?.errorMessage ?? "unknown failure"}\n`);
+      console.log(`Generated repro: ${result.generatedRepro.command}`);
+      printCreateResult(result);
     });
   });
 
