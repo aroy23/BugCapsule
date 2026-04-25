@@ -8,7 +8,6 @@ This repository is MCP-first. There is no standalone BugCapsule CLI or installab
 
 - `@bugcapsule/core` contains capsule creation, verification, and apply-back logic.
 - `@bugcapsule/mcp` exposes BugCapsule as a local MCP server.
-- `examples/acme-saas` contains the invoice export demo bug.
 
 ## Local Development
 

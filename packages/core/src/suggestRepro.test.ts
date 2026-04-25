@@ -1,12 +1,23 @@
+import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { suggestRepro } from "./suggestRepro.js";
+import { writeInvoiceFixtureRepo } from "./testFixtures.js";
+
+const tempRoot = path.resolve(".tmp-tests/suggest-repro");
 
 describe("suggestRepro", () => {
+  afterEach(async () => {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("ranks matching tests and runtime repro scripts from a vague bug description", async () => {
+    const repoPath = path.join(tempRoot, "invoice-fixture");
+    await writeInvoiceFixtureRepo(repoPath);
+
     const result = await suggestRepro({
-      repoPath: path.resolve("examples/acme-saas"),
+      repoPath,
       bugDescription: "invoice export crashes when billing address is missing"
     });
 

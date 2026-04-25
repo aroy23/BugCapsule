@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { applyCapsule } from "./applyCapsule.js";
 import { createCapsule } from "./createCapsule.js";
+import { writeInvoiceFixtureRepo } from "./testFixtures.js";
 
 const tempRoot = path.resolve(".tmp-tests/core");
 
@@ -13,8 +14,8 @@ describe("BugCapsule create/apply integration", () => {
   });
 
   it("creates a failing capsule, applies a capsule fix, and verifies the original repro", async () => {
-    const repoPath = path.join(tempRoot, "acme-saas");
-    await copyDemoRepo(repoPath);
+    const repoPath = path.join(tempRoot, "invoice-fixture");
+    await writeInvoiceFixtureRepo(repoPath);
 
     const created = await createCapsule({
       repoPath,
@@ -55,15 +56,3 @@ describe("BugCapsule create/apply integration", () => {
     expect(await fs.readFile(path.join(repoPath, "src/billing/customerAddress.ts"), "utf8")).toContain("if (!address)");
   });
 });
-
-async function copyDemoRepo(targetPath: string): Promise<void> {
-  await fs.rm(targetPath, { recursive: true, force: true });
-  await fs.mkdir(path.dirname(targetPath), { recursive: true });
-  await fs.cp(path.resolve("examples/acme-saas"), targetPath, {
-    recursive: true,
-    filter: (source) =>
-      !source.includes(`${path.sep}.bugcapsule`) &&
-      !source.includes(`${path.sep}dist`) &&
-      !source.includes(`${path.sep}node_modules`)
-  });
-}

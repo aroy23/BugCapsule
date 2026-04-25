@@ -1,11 +1,22 @@
+import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { buildImportGraph } from "./importGraph.js";
+import { writeInvoiceFixtureRepo } from "./testFixtures.js";
+
+const tempRoot = path.resolve(".tmp-tests/import-graph");
 
 describe("buildImportGraph", () => {
+  afterEach(async () => {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+
   it("walks TypeScript imports and records external service imports", async () => {
-    const graph = await buildImportGraph(path.resolve("examples/acme-saas"), [
+    const repoPath = path.join(tempRoot, "invoice-fixture");
+    await writeInvoiceFixtureRepo(repoPath);
+
+    const graph = await buildImportGraph(repoPath, [
       "tests/export-missing-address.test.ts"
     ]);
 
