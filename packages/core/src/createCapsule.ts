@@ -5,6 +5,7 @@ import { minimatch } from "minimatch";
 import { defaultConfig } from "./config.js";
 import { captureFailure } from "./failureCapture.js";
 import { copyTextFile, ensureDir, hashFile, hashString, isSecretPath, listProjectFiles, pathExists, readJsonFile, writeTextFile } from "./fileUtils.js";
+import { ensureBugCapsuleGitignoreEntry } from "./gitignore.js";
 import { createMockPlan, rewriteExternalImports } from "./mockGenerator.js";
 import { capsulePathFor, manifestRelativeLogPath, writeManifest, writeReadme, writeReport } from "./manifest.js";
 import { detectProject } from "./projectDetector.js";
@@ -25,6 +26,7 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
   assertInsideRoot(repoPath, repoPath);
 
   const capsuleId = await resolveCapsuleId(repoPath, options);
+  await ensureBugCapsuleGitignoreEntry(repoPath);
   const project = await detectProject(repoPath);
   const failure = await captureFailure(repoPath, options.command, capsuleId);
 
