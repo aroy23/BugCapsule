@@ -19,22 +19,36 @@ Use this skill when:
 - The agent cannot reproduce a reported behavior.
 - The agent needs to isolate a bug before editing the main codebase.
 
+## Minimal user request
+
+The user does not need to provide a long workflow. If they provide a repo path and failing command, proceed without asking for more BugCapsule instructions.
+
+Example:
+
+```text
+Use BugCapsule to fix this.
+repoPath: /path/to/repo
+command: npm test -- checkout-missing-shipping-address
+```
+
 ## Workflow
 
 1. Check that the BugCapsule MCP server is available.
-2. If there is a failing command, call `bugcapsule_create_from_command`.
+2. If there is a failing command, call `bugcapsule_create_from_command` immediately.
 3. If there is a Playwright trace, call `bugcapsule_create_from_playwright_trace`.
-4. Open the generated capsule path.
-5. Read `README.md` and `capsule.json`.
-6. Run the capsule repro command.
-7. Fix the failing capsule test.
-8. Run the capsule repro command again.
-9. Call `bugcapsule_apply_patch` with `verify=true`.
-10. Summarize which original files changed and which verification checks passed.
+4. Follow the `agentWorkflow` returned by the tool response.
+5. Open the generated capsule path.
+6. Read `README.md` and `capsule.json`.
+7. Run the capsule repro command.
+8. Fix the failing capsule test.
+9. Run the capsule repro command again.
+10. Call `bugcapsule_apply_patch` with `verify=true`.
+11. Summarize which original files changed and which verification checks passed.
 
 ## Rules
 
 - Do not edit unrelated original repo files before creating a capsule unless the user explicitly asks.
+- If a failing command is available, do not ask the user to restate the workflow.
 - Do not delete capsule metadata.
 - Prefer fixing the smallest root cause inside the capsule.
 - After the capsule passes, always apply through BugCapsule rather than manually copying code back.

@@ -17,3 +17,15 @@ npm install
 npm run build
 npm test
 ```
+
+## Using BugCapsule From An MCP Agent
+
+After configuring the local MCP server, the user prompt can be short:
+
+```text
+Use BugCapsule to fix this.
+repoPath: /Users/arnav/Desktop/Demo
+command: npm test -- checkout-missing-shipping-address
+```
+
+The MCP tool returns an `agentWorkflow` with the capsule path, repro command, editable files, and the exact apply-back call.

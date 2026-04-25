@@ -11,7 +11,9 @@ import {
   inspectCapsule,
   listCapsules,
   runCapsule,
-  verifyCapsule
+  verifyCapsule,
+  type BugCapsuleManifest,
+  type CreateCapsuleResult
 } from "@bugcapsule/core";
 
 const server = new McpServer({
@@ -29,8 +31,12 @@ function registerTools(mcp: McpServer): void {
   mcp.registerTool(
     "bugcapsule_create_from_command",
     {
-      title: "Create BugCapsule From Command",
-      description: "Create a minimized runnable capsule from a failing shell command.",
+      title: "Start BugCapsule Debugging From Failing Command",
+      description: [
+        "Call this first whenever the user asks BugCapsule to isolate, shrink, or fix a bug and provides a failing command.",
+        "This tool runs the failing command, creates a minimized executable capsule, and returns the exact next workflow for the agent.",
+        "After this tool succeeds, do not ask the user for more BugCapsule steps: open the capsulePath, fix only the capsule, rerun its runCommand, then call bugcapsule_apply_patch with verify=true."
+      ].join(" "),
       inputSchema: {
         repoPath: z.string(),
         command: z.string(),
@@ -59,13 +65,26 @@ function registerTools(mcp: McpServer): void {
         status: result.status,
         capsulePath: result.capsulePath,
         runCommand: result.manifest.capsule.runCommand,
+        capsuleReadmePath: path.join(result.capsulePath, "README.md"),
+        capsuleManifestPath: path.join(result.capsulePath, "capsule.json"),
         summary: {
           originalFileCount: result.manifest.metrics.originalFileCount,
           capsuleFileCount: result.manifest.metrics.capsuleFileCount,
           contextReductionPercent: result.manifest.metrics.contextReductionPercent,
-          failureMessage: result.manifest.originalRepro.failureSummary
+          failureMessage: result.manifest.originalRepro.failureSummary,
+          includedEditableFiles: editableFiles(result.manifest),
+          generatedMocks: result.manifest.mocks.map((mock) => mock.moduleName)
         },
-        nextAgentInstruction: "Open the capsule path, run npm test, fix the failing test, then call bugcapsule_apply_patch."
+        agentWorkflow: buildAgentWorkflow(result),
+        applyPatchToolCall: {
+          tool: "bugcapsule_apply_patch",
+          arguments: {
+            repoPath: args.repoPath,
+            capsuleId: result.capsuleId,
+            verify: true
+          }
+        },
+        nextAgentInstruction: `Open ${result.capsulePath}, read README.md and capsule.json, run ${result.manifest.capsule.runCommand}, fix the failing behavior only inside the capsule, rerun ${result.manifest.capsule.runCommand}, then call bugcapsule_apply_patch with verify=true.`
       });
     }
   );
@@ -114,7 +133,7 @@ function registerTools(mcp: McpServer): void {
     "bugcapsule_run",
     {
       title: "Run BugCapsule",
-      description: "Run a capsule repro command.",
+      description: "Run a capsule repro command. Use this after bugcapsule_create_from_command if the agent wants MCP to execute the capsule test instead of running a shell command directly.",
       inputSchema: {
         repoPath: z.string(),
         capsuleId: z.string(),
@@ -132,7 +151,7 @@ function registerTools(mcp: McpServer): void {
     "bugcapsule_inspect",
     {
       title: "Inspect BugCapsule",
-      description: "Read a capsule manifest and README.",
+      description: "Read a capsule manifest and README. Use this after create when the agent needs file-map details or fix instructions.",
       inputSchema: {
         repoPath: z.string(),
         capsuleId: z.string()
@@ -142,7 +161,11 @@ function registerTools(mcp: McpServer): void {
       const manifest = await inspectCapsule({ repoPath: args.repoPath, capsuleId: args.capsuleId });
       const readmePath = path.join(manifest.capsule.path, "README.md");
       const readme = await fs.readFile(readmePath, "utf8");
-      return jsonResult({ manifest, readme });
+      return jsonResult({
+        manifest,
+        readme,
+        agentWorkflow: buildAgentWorkflowFromManifest(args.repoPath, manifest)
+      });
     }
   );
 
@@ -150,7 +173,7 @@ function registerTools(mcp: McpServer): void {
     "bugcapsule_apply_patch",
     {
       title: "Apply BugCapsule Patch",
-      description: "Apply changed capsule files back to their original source paths.",
+      description: "Apply changed capsule files back to their original source paths. Call this after the capsule tests pass; default verify=true reruns both capsule and original repro.",
       inputSchema: {
         repoPath: z.string(),
         capsuleId: z.string(),
@@ -237,6 +260,30 @@ function registerPrompts(mcp: McpServer): void {
       ]
     })
   );
+
+  mcp.registerPrompt(
+    "bugcapsule_fix_from_command",
+    {
+      title: "Fix Bug With BugCapsule",
+      description: "Short reusable workflow for using BugCapsule when the user provides only repoPath and a failing command.",
+      argsSchema: {
+        repoPath: z.string(),
+        command: z.string()
+      }
+    },
+    (args) => ({
+      description: "Use BugCapsule to isolate and fix a failing command.",
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Use BugCapsule to fix this bug.\n\nRepo path:\n${args.repoPath}\n\nFailing command:\n${args.command}\n\nCall bugcapsule_create_from_command first. Follow the agentWorkflow returned by the tool. Fix only files inside the generated capsule until the capsule passes. Then call bugcapsule_apply_patch with verify=true and summarize the original files changed.`
+          }
+        }
+      ]
+    })
+  );
 }
 
 async function readCapsuleResource(repoPath: string, capsulePath: string, capsuleId: string, resource: string): Promise<string> {
@@ -269,4 +316,72 @@ function jsonResult(value: unknown): { content: Array<{ type: "text"; text: stri
       }
     ]
   };
+}
+
+function buildAgentWorkflow(result: CreateCapsuleResult): Array<{
+  step: number;
+  action: string;
+  detail: string;
+}> {
+  if (result.status === "failed_original_passed") {
+    return [
+      {
+        step: 1,
+        action: "stop",
+        detail: "The original command passed, so BugCapsule did not create a useful failing capsule. Ask the user for a command that currently fails."
+      }
+    ];
+  }
+
+  return buildAgentWorkflowFromManifest(result.manifest.originalRepo.rootPath, result.manifest);
+}
+
+function buildAgentWorkflowFromManifest(repoPath: string, manifest: BugCapsuleManifest): Array<{
+  step: number;
+  action: string;
+  detail: string;
+}> {
+  return [
+    {
+      step: 1,
+      action: "open_capsule",
+      detail: `Work in the generated capsule only: ${manifest.capsule.path}`
+    },
+    {
+      step: 2,
+      action: "read_context",
+      detail: "Read README.md and capsule.json to understand the failure, file map, and editable files."
+    },
+    {
+      step: 3,
+      action: "reproduce",
+      detail: `Run '${manifest.capsule.runCommand}' inside the capsule and confirm the failure: ${manifest.originalRepro.failureSummary}`
+    },
+    {
+      step: 4,
+      action: "fix_capsule",
+      detail: `Edit only mapped editable capsule files: ${editableFiles(manifest).join(", ") || "none detected"}`
+    },
+    {
+      step: 5,
+      action: "verify_capsule",
+      detail: `Rerun '${manifest.capsule.runCommand}' inside the capsule until it passes.`
+    },
+    {
+      step: 6,
+      action: "apply_back",
+      detail: `Call bugcapsule_apply_patch with repoPath='${repoPath}', capsuleId='${manifest.capsuleId}', verify=true.`
+    },
+    {
+      step: 7,
+      action: "summarize",
+      detail: "Tell the user which original files changed and which verification checks passed."
+    }
+  ];
+}
+
+function editableFiles(manifest: BugCapsuleManifest): string[] {
+  return manifest.files
+    .filter((file) => file.editable && file.originalPath)
+    .map((file) => file.capsulePath);
 }
