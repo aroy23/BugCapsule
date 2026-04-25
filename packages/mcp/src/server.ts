@@ -87,7 +87,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         excludeGlobs: z.array(z.string()).optional(),
         verifyCapsule: z.boolean().default(true),
         generateEvaluation: z.boolean().optional(),
-        evaluationModel: z.string().default("gpt-4o"),
+        evaluationModel: z.string().optional(),
         evaluationEncoding: z.string().optional(),
         inputPricePerMillion: z.number().nonnegative().optional(),
         outputPricePerMillion: z.number().nonnegative().optional()
@@ -159,7 +159,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         excludeGlobs: z.array(z.string()).optional(),
         verifyCapsule: z.boolean().default(true),
         generateEvaluation: z.boolean().optional(),
-        evaluationModel: z.string().default("gpt-4o"),
+        evaluationModel: z.string().optional(),
         evaluationEncoding: z.string().optional(),
         inputPricePerMillion: z.number().nonnegative().optional(),
         outputPricePerMillion: z.number().nonnegative().optional()
@@ -274,7 +274,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         verify: z.boolean().default(true),
         allowDirty: z.boolean().default(false),
         generateEvaluation: z.boolean().optional(),
-        evaluationModel: z.string().default("gpt-4o"),
+        evaluationModel: z.string().optional(),
         evaluationEncoding: z.string().optional(),
         inputPricePerMillion: z.number().nonnegative().optional(),
         outputPricePerMillion: z.number().nonnegative().optional()
@@ -289,19 +289,29 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         allowDirty: args.allowDirty
       });
 
-      const shouldGenerateEvaluation = args.generateEvaluation ?? hasEvaluationInputs(args);
+      const evaluationConfig = resolveEvaluationConfig(args);
 
-      if (!shouldGenerateEvaluation || args.dryRun || !result.status.startsWith("applied_")) {
+      if (evaluationConfig.status === "disabled" || args.dryRun || !result.status.startsWith("applied_")) {
         return jsonResult(result);
+      }
+
+      if (evaluationConfig.status === "invalid") {
+        return jsonResult({
+          ...result,
+          evaluation: {
+            status: "failed",
+            message: evaluationConfig.message
+          }
+        });
       }
 
       const evaluation = await runEvaluation({
         repoPath: args.repoPath,
         capsuleId: args.capsuleId,
-        evaluationModel: args.evaluationModel,
-        ...(args.evaluationEncoding ? { evaluationEncoding: args.evaluationEncoding } : {}),
-        ...(args.inputPricePerMillion !== undefined ? { inputPricePerMillion: args.inputPricePerMillion } : {}),
-        ...(args.outputPricePerMillion !== undefined ? { outputPricePerMillion: args.outputPricePerMillion } : {})
+        evaluationModel: evaluationConfig.evaluationModel,
+        ...(evaluationConfig.evaluationEncoding ? { evaluationEncoding: evaluationConfig.evaluationEncoding } : {}),
+        inputPricePerMillion: evaluationConfig.inputPricePerMillion,
+        outputPricePerMillion: evaluationConfig.outputPricePerMillion
       });
 
       return jsonResult({
@@ -516,15 +526,54 @@ function applyPatchArguments(args: {
   };
 }
 
-function hasEvaluationInputs(args: {
+type EvaluationConfig =
+  | { status: "disabled" }
+  | { status: "invalid"; message: string }
+  | {
+    status: "enabled";
+    evaluationModel: string;
+    evaluationEncoding?: string;
+    inputPricePerMillion: number;
+    outputPricePerMillion: number;
+  };
+
+function resolveEvaluationConfig(args: {
+  generateEvaluation?: boolean;
   evaluationModel?: string;
   evaluationEncoding?: string;
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
-}): boolean {
-  return Boolean(args.evaluationModel || args.evaluationEncoding) ||
+}): EvaluationConfig {
+  const hasAnyEvaluationInput = args.generateEvaluation !== undefined ||
+    Boolean(args.evaluationModel || args.evaluationEncoding) ||
     args.inputPricePerMillion !== undefined ||
     args.outputPricePerMillion !== undefined;
+
+  if (!hasAnyEvaluationInput || args.generateEvaluation === false) {
+    return { status: "disabled" };
+  }
+
+  if (!args.evaluationModel) {
+    return {
+      status: "invalid",
+      message: "Evaluation was requested, but evaluationModel is missing."
+    };
+  }
+
+  if (args.inputPricePerMillion === undefined || args.outputPricePerMillion === undefined) {
+    return {
+      status: "invalid",
+      message: "Evaluation was requested, but both inputPricePerMillion and outputPricePerMillion are required."
+    };
+  }
+
+  return {
+    status: "enabled",
+    evaluationModel: args.evaluationModel,
+    ...(args.evaluationEncoding ? { evaluationEncoding: args.evaluationEncoding } : {}),
+    inputPricePerMillion: args.inputPricePerMillion,
+    outputPricePerMillion: args.outputPricePerMillion
+  };
 }
 
 function buildAgentWorkflowFromManifest(repoPath: string, manifest: BugCapsuleManifest): Array<{

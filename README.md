@@ -33,7 +33,7 @@ BugCapsule can write a deterministic presentation artifact after `bugcapsule_app
 .bugcapsule/evaluations/<capsule-id>/evaluation.html
 ```
 
-Evaluation is opt-in. It does not run unless evaluation fields are supplied. Pass the evaluation pricing fields when applying the capsule patch:
+Evaluation is opt-in. It does not run unless evaluation fields are supplied. The evaluation config must be complete: `evaluationModel`, `inputPricePerMillion`, and `outputPricePerMillion` are required. Pass the evaluation pricing fields when applying the capsule patch:
 
 ```json
 {
