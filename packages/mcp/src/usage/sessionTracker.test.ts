@@ -76,7 +76,8 @@ describe("SessionTracker", () => {
     expect(md).toContain("BugCapsule Session");
     expect(md).toContain("bugcapsule_create_from_command");
     expect(md).toContain("bugcapsule_apply_patch");
-    expect(md).toMatch(/Saved ~\d+(?:\.\d+)?% on cost/);
+    expect(md).toContain("estimates tool request/response payload size only");
+    expect(md).toMatch(/Approximate payload reduction: ~\d+(?:\.\d+)?% on listed-price cost/);
   });
 
   it("uses repo-level pricing override when present", async () => {

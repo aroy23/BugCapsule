@@ -49,7 +49,9 @@ function buildMarkdown(session: FinalizedSession): string {
   lines.push(`- Started: ${session.startedAt}`);
   lines.push(`- Ended: ${session.endedAt}`);
   lines.push(`- Finalize reason: ${session.finalizeReason}`);
-  lines.push(`- Model: ${session.pricing.model} (input $${session.pricing.input_per_million}/M, output $${session.pricing.output_per_million}/M)`);
+  lines.push(`- Pricing profile: ${session.pricing.model} (input $${session.pricing.input_per_million}/M, output $${session.pricing.output_per_million}/M)`);
+  lines.push("");
+  lines.push("> Accuracy note: this MCP summary estimates tool request/response payload size only. It is not provider model usage, and it should not be used as an exact token or cost benchmark.");
   lines.push("");
   lines.push("## Calls");
   lines.push("");
@@ -68,21 +70,21 @@ function buildMarkdown(session: FinalizedSession): string {
   }
 
   lines.push("");
-  lines.push("## Totals");
+  lines.push("## MCP Payload Estimate");
   lines.push("");
-  lines.push(`- Total input tokens: ${session.totalInputTokens}`);
-  lines.push(`- Total output tokens: ${session.totalOutputTokens}`);
-  lines.push(`- Total cost: ${session.totalCost}`);
+  lines.push(`- Estimated input tokens: ${session.totalInputTokens}`);
+  lines.push(`- Estimated output tokens: ${session.totalOutputTokens}`);
+  lines.push(`- Estimated listed-price cost: ${session.totalCost}`);
   lines.push("");
-  lines.push("## Comparison vs. full-repo context");
+  lines.push("## Approximate Comparison vs. Full-Repo Context");
   lines.push("");
   lines.push(`- Estimated full-repo tokens: ${session.comparison.estimatedFullRepoTokens}`);
   lines.push(`- Capsule tokens: ${session.comparison.capsuleTokens}`);
   lines.push(`- Estimated full-repo cost: ${session.comparison.estimatedFullRepoCost}`);
-  lines.push(`- Actual cost: ${session.comparison.actualCost}`);
+  lines.push(`- Estimated MCP payload cost: ${session.comparison.actualCost}`);
   lines.push("");
   lines.push(
-    `Saved ~${session.comparison.costSavingsPercent.toFixed(1)}% on cost and ~${session.comparison.tokenSavingsPercent.toFixed(1)}% on tokens vs. dumping the full repo as context.`
+    `Approximate payload reduction: ~${session.comparison.costSavingsPercent.toFixed(1)}% on listed-price cost and ~${session.comparison.tokenSavingsPercent.toFixed(1)}% on tokens vs. dumping the full repo as context.`
   );
   lines.push("");
 

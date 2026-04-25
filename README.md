@@ -25,6 +25,48 @@ node -e 'console.log(require("node:path").resolve("packages/mcp/dist/server.js")
 
 Run `npm run build` after changing the server or core package so your IDE uses the latest `dist` files.
 
+## Quantitative Evaluation
+
+BugCapsule includes a deterministic evaluator for presentation-ready before/after artifacts:
+
+```bash
+npm run eval:capsule -- \
+  --repo /absolute/path/to/target-repo \
+  --capsule-id bc_example \
+  --model gpt-4o \
+  --input-price-per-million 2.50 \
+  --output-price-per-million 10.00
+```
+
+The evaluator writes:
+
+- `.bugcapsule/evaluations/<capsule-id>/evaluation.json`
+- `.bugcapsule/evaluations/<capsule-id>/evaluation.md`
+- `.bugcapsule/evaluations/<capsule-id>/evaluation.html`
+- `.bugcapsule/evaluations/<capsule-id>/evaluation.svg`
+
+The default visualization compares:
+
+- full-repo text context without BugCapsule
+- generated capsule context with BugCapsule
+- exact tokenizer counts for the configured OpenAI-compatible model or encoding
+- listed-price input-context cost, when pricing is supplied
+
+This is intentionally a context/cost baseline, not an inferred no-BugCapsule agent run. Exact fix cost without BugCapsule cannot be derived from a BugCapsule run. To compare actual fix cost, run the same instrumented agent twice: once on the original repo without BugCapsule and once through BugCapsule, then pass exact provider or harness usage JSON:
+
+```bash
+npm run eval:capsule -- \
+  --repo /absolute/path/to/target-repo \
+  --capsule-id bc_example \
+  --model gpt-4o \
+  --input-price-per-million 2.50 \
+  --output-price-per-million 10.00 \
+  --baseline-usage /path/to/no-bugcapsule-usage.json \
+  --bugcapsule-usage /path/to/bugcapsule-usage.json
+```
+
+The MCP session summaries under `.bugcapsule/logs` are only approximate MCP tool payload logs. They do not observe the IDE or provider's actual model prompt/completion usage and should not be used as exact evaluation evidence.
+
 ## Add BugCapsule To An MCP IDE
 
 BugCapsule runs as a stdio MCP server. The important configuration is always:
