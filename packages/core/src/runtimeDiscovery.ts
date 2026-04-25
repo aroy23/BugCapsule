@@ -1,9 +1,11 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 
 import { createCapsule } from "./createCapsule.js";
 import { ensureDir, pathExists, writeTextFile } from "./fileUtils.js";
 import { capsulePathFor } from "./manifest.js";
 import { assertInsideRoot, normalizePath, slugify } from "./pathUtils.js";
+import { runShellCommand } from "./shell.js";
 import { extractFailureSummary, parseStackTrace } from "./stackTraceParser.js";
 import type {
   CreateCapsuleFromRuntimeOptions,
@@ -22,6 +24,7 @@ type TargetExport = {
   file: string;
   name: string;
   score: number;
+  stackIndex: number;
 };
 
 type GeneratedRuntimeRepro = RuntimeGeneratedRepro & {
@@ -274,7 +277,7 @@ async function buildGeneratedRuntimeRepro(
     return undefined;
   }
 
-  const target = await selectTargetExport(repoPath, failure.stackTrace, [
+  const target = await selectTargetExport(repoPath, capsuleId, failure, payload.value, [
     options.bugDescription,
     options.interactionHint,
     failure.url
@@ -347,7 +350,25 @@ async function discoverInputPayload(failure: RuntimeFailure): Promise<{ value: u
   return undefined;
 }
 
-async function selectTargetExport(repoPath: string, stackTrace: StackFrame[], hintText: string): Promise<TargetExport | undefined> {
+async function selectTargetExport(
+  repoPath: string,
+  capsuleId: string,
+  failure: RuntimeFailure,
+  input: unknown,
+  hintText: string
+): Promise<TargetExport | undefined> {
+  const candidates = await findTargetExportCandidates(repoPath, failure.stackTrace, hintText);
+
+  for (const [index, candidate] of candidates.entries()) {
+    if (await validatesRuntimeTarget(repoPath, capsuleId, candidate, input, failure, index)) {
+      return candidate;
+    }
+  }
+
+  return candidates.sort((left, right) => right.score - left.score || left.file.localeCompare(right.file))[0];
+}
+
+async function findTargetExportCandidates(repoPath: string, stackTrace: StackFrame[], hintText: string): Promise<TargetExport[]> {
   const tokens = tokenize(hintText);
   const candidates: TargetExport[] = [];
 
@@ -358,7 +379,7 @@ async function selectTargetExport(repoPath: string, stackTrace: StackFrame[], hi
     let content: string;
 
     try {
-      content = await import("node:fs/promises").then((fs) => fs.readFile(absolutePath, "utf8"));
+      content = await fs.readFile(absolutePath, "utf8");
     } catch {
       continue;
     }
@@ -377,12 +398,70 @@ async function selectTargetExport(repoPath: string, stackTrace: StackFrame[], hi
       candidates.push({
         file: frame.file,
         name,
-        score: scoreTarget(frame.file, name, tokens, index, exactFrameMatch)
+        score: scoreTarget(frame.file, name, tokens, index, exactFrameMatch),
+        stackIndex: index
       });
     }
   }
 
-  return candidates.sort((left, right) => right.score - left.score || left.file.localeCompare(right.file))[0];
+  return candidates.sort((left, right) =>
+    left.stackIndex - right.stackIndex ||
+    right.score - left.score ||
+    left.file.localeCompare(right.file)
+  );
+}
+
+async function validatesRuntimeTarget(
+  repoPath: string,
+  capsuleId: string,
+  target: TargetExport,
+  input: unknown,
+  failure: RuntimeFailure,
+  index: number
+): Promise<boolean> {
+  const reproPath = normalizePath(path.join(".bugcapsule", "repros", `${capsuleId}.candidate-${index + 1}.ts`));
+  const absolutePath = path.join(repoPath, reproPath);
+  assertInsideRoot(repoPath, absolutePath);
+
+  const content = renderRuntimeRepro({
+    targetName: target.name,
+    importSpecifier: importSpecifierFor(reproPath, target.file),
+    input,
+    failure
+  });
+
+  await ensureDir(path.dirname(absolutePath));
+  await writeTextFile(absolutePath, content);
+
+  try {
+    const result = await runShellCommand(`npx tsx ${reproPath}`, repoPath);
+
+    if (result.exitCode === 0) {
+      return false;
+    }
+
+    const summary = extractFailureSummary(`${result.stderr}\n${result.stdout}`);
+    return failureSummariesMatch(failure.errorMessage, summary);
+  } finally {
+    await fs.rm(absolutePath, { force: true });
+  }
+}
+
+function failureSummariesMatch(expected: string, actual: string): boolean {
+  const normalizedExpected = normalizeFailureText(expected);
+  const normalizedActual = normalizeFailureText(actual);
+
+  return normalizedExpected.length > 0 &&
+    normalizedActual.length > 0 &&
+    (normalizedActual.includes(normalizedExpected) || normalizedExpected.includes(normalizedActual));
+}
+
+function normalizeFailureText(value: string): string {
+  return value
+    .replace(/\u001b\[[0-9;]*m/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function renderRuntimeRepro(options: {
