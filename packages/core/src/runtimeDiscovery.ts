@@ -476,6 +476,7 @@ const input = ${JSON.stringify(options.input, null, 2)} as const;
 
 try {
   const result = await Promise.resolve(${options.targetName}(input as never));
+  assertMeaningfulRuntimeResult(result);
   console.log(JSON.stringify({ ok: true, result }, null, 2));
 } catch (error) {
   if (error instanceof Error) {
@@ -484,6 +485,57 @@ try {
     console.error(String(error));
   }
   process.exitCode = 1;
+}
+
+function assertMeaningfulRuntimeResult(value: unknown): void {
+  const placeholderPath = findPlaceholderString(value, "result", new Set<object>());
+
+  if (placeholderPath) {
+    throw new Error(\`Runtime repro produced empty or placeholder output at \${placeholderPath}.\`);
+  }
+}
+
+function findPlaceholderString(value: unknown, path: string, seen: Set<object>): string | undefined {
+  if (typeof value === "string") {
+    return isPlaceholderString(value) ? path : undefined;
+  }
+
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  if (seen.has(value)) {
+    return undefined;
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      const found = findPlaceholderString(item, \`\${path}[\${index}]\`, seen);
+
+      if (found) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    const found = findPlaceholderString(item, \`\${path}.\${key}\`, seen);
+
+    if (found) {
+      return found;
+    }
+  }
+
+  return undefined;
+}
+
+function isPlaceholderString(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length === 0 || !/[A-Za-z0-9]/.test(trimmed);
 }
 `;
 }

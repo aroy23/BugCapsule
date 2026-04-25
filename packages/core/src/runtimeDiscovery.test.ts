@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCapsuleFromRuntime, probeRuntime } from "./runtimeDiscovery.js";
+import { runShellCommand } from "./shell.js";
 
 let server: http.Server | undefined;
 const tempRoot = path.resolve(".tmp-tests/runtime-discovery");
@@ -148,6 +149,31 @@ describe("probeRuntime", () => {
     expect(capsuleFiles).not.toContain("src/analytics/checkoutAnalytics.ts");
     expect(capsuleFiles).not.toContain("src/payments/paymentGateway.ts");
     await expect(fs.readdir(path.join(repoPath, ".bugcapsule/repros"))).resolves.toEqual(["bc_runtime_checkout.ts"]);
+
+    await writeFile(result.capsulePath, "src/checkout/normalizeAddress.ts", `import type { Address } from "./types.js";
+
+export type NormalizedAddress = {
+  line1: string;
+};
+
+export function normalizeShippingAddress(address: Address | null): NormalizedAddress {
+  if (address === null) {
+    return {
+      line1: ""
+    };
+  }
+
+  return {
+    line1: address.line1.trim()
+  };
+}
+`);
+    await fs.symlink(path.resolve("node_modules"), path.join(result.capsulePath, "node_modules"), "dir");
+
+    const weakFix = await runShellCommand(result.manifest.capsule.runCommand, result.capsulePath);
+
+    expect(weakFix.exitCode).not.toBe(0);
+    expect(weakFix.stderr).toContain("Runtime repro produced empty or placeholder output at result.destination");
   });
 });
 
