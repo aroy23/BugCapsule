@@ -721,292 +721,754 @@ function renderMarkdown(report: EvaluationReport): string {
   return lines.join("\n");
 }
 
+type CardData = {
+  key: string;
+  eyebrow: string;
+  label: string;
+  before: string;
+  after: string;
+  saved: string;
+  pct: number;
+  pctOfBefore: number;
+  explainer: string;
+};
+
 function renderHtml(report: EvaluationReport): string {
-  const svg = renderSvg(report);
+  const c = report.contexts;
   const measured = report.measuredUsage;
+
+  const beforeTokens = c.fullRepo.contextTokens;
+  const afterTokens = c.bugCapsule.contextTokens;
+  const tokensSaved = Math.max(0, beforeTokens - afterTokens);
+  const beforeFiles = c.fullRepo.fileCount;
+  const afterFiles = c.bugCapsule.fileCount;
+  const filesSaved = Math.max(0, beforeFiles - afterFiles);
+  const beforeBytes = c.fullRepo.byteCount;
+  const afterBytes = c.bugCapsule.byteCount;
+  const bytesSaved = Math.max(0, beforeBytes - afterBytes);
+  const beforeCost = c.fullRepo.contextInputCostUsd;
+  const afterCost = c.bugCapsule.contextInputCostUsd;
+  const costAvailable = beforeCost !== null && afterCost !== null;
+  const costSaved = costAvailable ? Math.max(0, (beforeCost ?? 0) - (afterCost ?? 0)) : null;
+  const ratio = afterTokens > 0 ? Math.max(1, Math.round(beforeTokens / afterTokens)) : 0;
+  const generatedFormatted = report.generatedAt.replace("T", " ").slice(0, 19) + " UTC";
+
+  const cards: CardData[] = [
+    {
+      key: "tokens",
+      eyebrow: "tokens",
+      label: "Context tokens",
+      before: formatNumber(beforeTokens),
+      after: formatNumber(afterTokens),
+      saved: formatNumber(tokensSaved),
+      pct: c.savings.contextTokensPercent,
+      pctOfBefore: beforeTokens > 0 ? (afterTokens / beforeTokens) * 100 : 0,
+      explainer: "Tokens are how language models charge for inputs. The full-repo payload is the entire deterministic context an unscoped agent might ingest. The capsule keeps only what reproduces the failure."
+    },
+    {
+      key: "files",
+      eyebrow: "files",
+      label: "Files",
+      before: formatNumber(beforeFiles),
+      after: formatNumber(afterFiles),
+      saved: formatNumber(filesSaved),
+      pct: c.savings.filesPercent,
+      pctOfBefore: beforeFiles > 0 ? (afterFiles / beforeFiles) * 100 : 0,
+      explainer: "Source files included in the context payload. node_modules, build artifacts, lockfiles, and binaries are excluded by default for both views, so this is an apples-to-apples count."
+    },
+    {
+      key: "bytes",
+      eyebrow: "storage",
+      label: "Storage size",
+      before: formatBytes(beforeBytes),
+      after: formatBytes(afterBytes),
+      saved: formatBytes(bytesSaved),
+      pct: c.savings.bytesPercent,
+      pctOfBefore: beforeBytes > 0 ? (afterBytes / beforeBytes) * 100 : 0,
+      explainer: "Raw byte size of every included source file. A small capsule ships faster, caches better, and is dramatically easier to inspect when triaging an incident."
+    }
+  ];
+
+  if (costAvailable) {
+    cards.push({
+      key: "cost",
+      eyebrow: "USD",
+      label: "Input-context cost",
+      before: formatCost(beforeCost),
+      after: formatCost(afterCost),
+      saved: formatCost(costSaved),
+      pct: c.savings.contextInputCostPercent ?? 0,
+      pctOfBefore: beforeCost && beforeCost > 0 ? ((afterCost ?? 0) / beforeCost) * 100 : 0,
+      explainer: "Listed-price cost of feeding the context payload to the model once, at the configured input rate. Multiply by the number of fix attempts to see compounded impact."
+    });
+  }
+
+  const cardsHtml = cards.map((m) => `
+        <button class="metric-card" type="button" data-metric="${escapeHtml(m.key)}" aria-expanded="false">
+          <div class="card-eyebrow">${escapeHtml(m.eyebrow)}</div>
+          <div class="card-label">${escapeHtml(m.label)}</div>
+          <div class="card-savings ${m.pct >= 0 ? "is-pos" : "is-neg"}">
+            <span class="card-pct" data-target="${m.pct}">${escapeHtml(formatPercent(Math.abs(m.pct)))}</span>
+            <span class="card-pct-word">${m.pct >= 0 ? "saved" : "more"}</span>
+          </div>
+          <div class="card-numbers">
+            <div class="num-side"><span class="num-tag">before</span><span class="num-val">${escapeHtml(m.before)}</span></div>
+            <svg class="num-arrow" viewBox="0 0 28 12" width="38" height="14" aria-hidden="true"><path d="M1 6h25M21 1l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="num-side after"><span class="num-tag">after</span><span class="num-val">${escapeHtml(m.after)}</span></div>
+          </div>
+          <div class="card-bar">
+            <div class="card-bar-track"><div class="card-bar-fill" style="--target-w: ${m.pctOfBefore.toFixed(2)}%"></div></div>
+            <span class="card-bar-caption">capsule keeps ${m.pctOfBefore.toFixed(1)}% of original</span>
+          </div>
+          <div class="card-detail">
+            <p>${escapeHtml(m.explainer)}</p>
+            <div class="card-detail-grid">
+              <div class="card-detail-item"><span>Saved</span><strong>${escapeHtml(m.saved)}</strong></div>
+              <div class="card-detail-item"><span>Reduction</span><strong>${escapeHtml(formatPercent(m.pct))}</strong></div>
+              <div class="card-detail-item"><span>Capsule keeps</span><strong>${m.pctOfBefore.toFixed(1)}%</strong></div>
+            </div>
+          </div>
+          <div class="card-cta">
+            <span>Tap for context</span>
+            <span class="card-cta-icon" aria-hidden="true">＋</span>
+          </div>
+        </button>`).join("");
+
+  const chartRowsHtml = cards.map((m) => `
+          <div class="bar-row" data-row="${escapeHtml(m.key)}">
+            <div class="bar-row-head">
+              <div class="bar-row-label">${escapeHtml(m.label)}</div>
+              <div class="bar-row-pct ${m.pct >= 0 ? "is-pos" : "is-neg"}">${escapeHtml(formatPercent(Math.abs(m.pct)))} ${m.pct >= 0 ? "saved" : "more"}</div>
+            </div>
+            <div class="bar-row-tracks">
+              <div class="bar-track">
+                <span class="bar-track-tag">without</span>
+                <div class="bar-track-bar"><div class="bar-track-fill is-before" style="--target-w: 100%"></div></div>
+                <span class="bar-track-value">${escapeHtml(m.before)}</span>
+              </div>
+              <div class="bar-track">
+                <span class="bar-track-tag">with</span>
+                <div class="bar-track-bar"><div class="bar-track-fill is-after" style="--target-w: ${m.pctOfBefore.toFixed(2)}%"></div></div>
+                <span class="bar-track-value">${escapeHtml(m.after)}</span>
+              </div>
+            </div>
+          </div>`).join("");
+
+  const repoTop = c.fullRepo.largestFiles;
+  const capsuleTop = c.bugCapsule.largestFiles;
+  const allLarge = [...repoTop, ...capsuleTop];
+  const largeMaxTokens = allLarge.length > 0 ? Math.max(...allLarge.map((f) => f.sourceTokens), 1) : 1;
+
+  const renderLargeList = (files: FileMetric[], emptyText: string): string => files.length === 0
+    ? `<div class="lf-empty">${escapeHtml(emptyText)}</div>`
+    : files.map((f) => `
+            <div class="lf-row">
+              <div class="lf-path" title="${escapeHtml(f.path)}">${escapeHtml(f.path)}</div>
+              <div class="lf-bar"><div class="lf-fill" style="--target-w: ${(f.sourceTokens / largeMaxTokens * 100).toFixed(2)}%"></div></div>
+              <div class="lf-tokens"><span class="lf-tokens-num">${escapeHtml(formatNumber(f.sourceTokens))}</span><span class="lf-tokens-unit">tok</span></div>
+            </div>`).join("");
+
+  const projectionMultipliers = [1, 10, 100, 1000, 10000];
+  const projectionHtml = costAvailable && costSaved !== null && costSaved > 0 ? `
+      <section class="block cost-block" id="cost-projection">
+        <header class="block-head">
+          <div class="block-eyebrow">— compounded savings</div>
+          <h2 class="block-title">Cost <em>over time</em></h2>
+          <p class="block-sub">Per-run savings compound across every fix attempt. Pick a scale to project the dollar impact.</p>
+        </header>
+        <div class="proj-card">
+          <div class="proj-display">
+            <div class="proj-label">total saved</div>
+            <div class="proj-amount">
+              <span class="proj-symbol">$</span><span class="proj-num" data-base="${costSaved}" data-multiplier="1">${escapeHtml(formatCost(costSaved).replace("$", ""))}</span>
+            </div>
+            <div class="proj-runs-line">across <strong class="proj-runs">1</strong> <span class="proj-runs-noun">run</span></div>
+          </div>
+          <div class="proj-controls" role="tablist" aria-label="Projection scale">
+            ${projectionMultipliers.map((mul, i) => `
+            <button class="proj-btn${i === 0 ? " is-active" : ""}" data-multiplier="${mul}" type="button" role="tab" aria-selected="${i === 0 ? "true" : "false"}">
+              <span class="proj-btn-num">${mul.toLocaleString("en-US")}×</span>
+              <span class="proj-btn-label">${mul === 1 ? "single" : mul < 100 ? "small team" : mul < 1000 ? "growing" : mul < 10000 ? "org-wide" : "fleet"}</span>
+            </button>`).join("")}
+          </div>
+          <div class="proj-foot">
+            Per run: <strong>${escapeHtml(formatCost(costSaved))}</strong> saved${report.pricing.inputPerMillion !== null ? ` · Input rate: <strong>${escapeHtml(formatCost(report.pricing.inputPerMillion))}/M tokens</strong>` : ""}
+          </div>
+        </div>
+      </section>` : "";
+
+  const measuredHtml = measured ? `
+      <section class="block measured-block" id="measured">
+        <header class="block-head">
+          <div class="block-eyebrow">— measured agent usage</div>
+          <h2 class="block-title">Real <em>fix runs</em></h2>
+          <p class="block-sub">Provider usage logs from instrumented agent runs. Captures the agent's actual behavior, not just the deterministic baseline.</p>
+        </header>
+        <div class="measured-grid">
+          ${renderMeasuredCard("Input tokens", formatNumber(measured.withoutBugCapsule?.inputTokens), formatNumber(measured.withBugCapsule?.inputTokens), measured.savings?.inputTokensPercent)}
+          ${renderMeasuredCard("Output tokens", formatNumber(measured.withoutBugCapsule?.outputTokens), formatNumber(measured.withBugCapsule?.outputTokens), measured.savings?.outputTokensPercent)}
+          ${renderMeasuredCard("Total tokens", formatNumber(measured.withoutBugCapsule?.totalTokens), formatNumber(measured.withBugCapsule?.totalTokens), measured.savings?.totalTokensPercent)}
+          ${renderMeasuredCard("Listed cost", formatCost(measured.withoutBugCapsule?.listedCostUsd ?? null), formatCost(measured.withBugCapsule?.listedCostUsd ?? null), measured.savings?.listedCostPercent)}
+        </div>
+      </section>` : `
+      <section class="block measured-block measured-empty">
+        <header class="block-head">
+          <div class="block-eyebrow">— measured agent usage</div>
+          <h2 class="block-title">Awaiting <em>real runs</em></h2>
+          <p class="block-sub">${escapeHtml(report.methodology.actualFixCost)}</p>
+        </header>
+      </section>`;
+
+  const exclusionsHtml = report.methodology.excludedByDefault.map((e) => `<li>${escapeHtml(e)}</li>`).join("");
+
+  const grainSvg = "data:image/svg+xml;utf8," + encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>`
+  );
+
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BugCapsule Evaluation ${escapeHtml(report.capsuleId)}</title>
+  <title>BugCapsule · ${escapeHtml(report.capsuleId)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f6f7f9;
-      --ink: #18202a;
-      --muted: #657286;
-      --line: #d9dee7;
-      --before: #d54b4b;
-      --after: #257b63;
-      --panel: #ffffff;
+      color-scheme: dark;
+      --bg: #0a0a0c;
+      --bg-2: #101014;
+      --surface: #15151b;
+      --surface-2: #1c1c24;
+      --border: #26262e;
+      --border-strong: #3a3a44;
+      --ink: #f4f1ea;
+      --ink-2: #ddd8cc;
+      --muted: #88848d;
+      --muted-2: #5e5b62;
+      --before: #ff8264;
+      --before-soft: rgba(255, 130, 100, 0.14);
+      --before-line: rgba(255, 130, 100, 0.32);
+      --after: #84e0a8;
+      --after-soft: rgba(132, 224, 168, 0.14);
+      --after-line: rgba(132, 224, 168, 0.36);
+      --grad-1: #84e0a8;
+      --grad-2: #5fc8e0;
+      --grad-3: #b794f4;
     }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: var(--ink);
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
       background: var(--bg);
+      color: var(--ink);
+      font-family: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-weight: 400;
+      font-size: 16px;
+      line-height: 1.55;
+      letter-spacing: -0.005em;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
-    main {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 32px;
+
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(1200px 600px at 80% -10%, rgba(132, 224, 168, 0.06), transparent 60%),
+        radial-gradient(900px 500px at -10% 30%, rgba(95, 200, 224, 0.04), transparent 60%),
+        var(--bg);
     }
-    header {
-      display: flex;
-      justify-content: space-between;
-      gap: 24px;
-      align-items: end;
-      border-bottom: 1px solid var(--line);
-      padding-bottom: 20px;
-      margin-bottom: 24px;
+
+    .grain {
+      position: fixed; inset: 0; pointer-events: none; z-index: 1;
+      opacity: 0.06; mix-blend-mode: overlay;
+      background-image: url("${grainSvg}");
+      background-size: 240px 240px;
     }
-    h1 {
-      margin: 0;
-      font-size: 32px;
-      line-height: 1.05;
-      letter-spacing: 0;
-    }
-    .sub {
-      margin-top: 8px;
+
+    main { position: relative; z-index: 2; max-width: 1240px; margin: 0 auto; padding: 28px clamp(20px, 4vw, 48px) 96px; }
+
+    .topbar {
+      display: flex; flex-wrap: wrap; gap: 18px;
+      align-items: center; justify-content: space-between;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase;
       color: var(--muted);
-      max-width: 780px;
-      line-height: 1.45;
     }
-    .badge {
-      white-space: nowrap;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      padding: 10px 12px;
-      border-radius: 8px;
-      font-weight: 700;
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); }
+    .brand-mark {
+      display: inline-grid; place-items: center;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--grad-1), var(--grad-2));
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 0 24px rgba(132,224,168,0.35);
     }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin: 24px 0;
+    .brand-mark::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--bg); }
+    .brand-name { font-weight: 600; letter-spacing: 0.08em; color: var(--ink); }
+    .brand-divider { color: var(--muted-2); }
+    .brand-section { color: var(--muted); }
+    .topbar-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+    .meta-pill { padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--ink-2); }
+    .meta-pill .k { color: var(--muted-2); margin-right: 6px; }
+
+    .hero { padding: 76px 0 32px; }
+    .hero-eyebrow { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 22px; opacity: 0; animation: fadeUp 0.8s ease 0.1s forwards; }
+    .hero-eyebrow::before { content: ""; width: 22px; height: 1px; background: var(--muted); }
+
+    .hero-headline {
+      font-family: "Instrument Serif", "Times New Roman", serif;
+      font-weight: 400; font-style: normal;
+      font-size: clamp(48px, 7.5vw, 96px);
+      line-height: 0.98;
+      letter-spacing: -0.025em;
+      color: var(--ink);
+      max-width: 1100px;
     }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 16px;
-      min-height: 116px;
+    .hero-headline .seg { display: inline; opacity: 0; animation: fadeUp 1s ease forwards; }
+    .hero-headline .seg-1 { animation-delay: 0.18s; }
+    .hero-headline .seg-2 { animation-delay: 0.32s; }
+    .hero-headline .seg-3 { animation-delay: 0.5s; }
+    .big-percent {
+      font-style: italic;
+      background: linear-gradient(135deg, var(--grad-1) 0%, var(--grad-2) 60%, var(--grad-3) 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      padding: 0 0.05em;
     }
-    .label {
-      color: var(--muted);
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0;
-      font-weight: 700;
+
+    .hero-lede { margin-top: 28px; max-width: 720px; color: var(--ink-2); font-size: 17px; line-height: 1.55; opacity: 0; animation: fadeUp 1s ease 0.7s forwards; }
+
+    .hero-stats {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
+      background: var(--border); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden;
+      margin-top: 40px;
+      opacity: 0; animation: fadeUp 1s ease 0.85s forwards;
     }
-    .value {
-      margin-top: 10px;
-      font-size: 28px;
-      font-weight: 800;
-    }
-    .pair {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
-      margin-top: 18px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
+    .hero-stats > div { background: var(--surface); padding: 22px 22px 20px; }
+    .hero-stat-label { font-family: "JetBrains Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .hero-stat-value { margin-top: 12px; font-family: "Instrument Serif", serif; font-size: 36px; font-style: italic; line-height: 1; letter-spacing: -0.01em; color: var(--ink); }
+    .hero-stat-sub { margin-top: 6px; color: var(--muted); font-size: 12.5px; font-family: "JetBrains Mono", monospace; }
+
+    .block { margin-top: 84px; }
+    .block-head { display: grid; gap: 8px; margin-bottom: 32px; max-width: 720px; }
+    .block-eyebrow { font-family: "JetBrains Mono", monospace; font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .block-title { font-family: "Instrument Serif", serif; font-weight: 400; font-size: clamp(32px, 4vw, 44px); line-height: 1.05; letter-spacing: -0.02em; color: var(--ink); }
+    .block-title em { font-style: italic; background: linear-gradient(135deg, var(--grad-1), var(--grad-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .block-sub { color: var(--muted); font-size: 14.5px; max-width: 600px; }
+
+    .bento-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+
+    .metric-card {
+      position: relative;
+      text-align: left; cursor: pointer;
+      background: linear-gradient(180deg, var(--surface), var(--bg-2));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px 24px 20px;
+      color: inherit;
+      font: inherit;
+      transition: border-color 0.25s ease, transform 0.25s ease, background 0.25s ease;
       overflow: hidden;
     }
-    th, td {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--line);
-      text-align: right;
+    .metric-card::before {
+      content: ""; position: absolute; inset: 0 0 auto 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--after-line), transparent);
+      opacity: 0; transition: opacity 0.3s ease;
     }
-    th:first-child, td:first-child { text-align: left; }
-    tr:last-child td { border-bottom: 0; }
-    th {
-      color: var(--muted);
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0;
+    .metric-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+    .metric-card:hover::before { opacity: 1; }
+    .metric-card:focus-visible { outline: 2px solid var(--grad-1); outline-offset: 2px; }
+
+    .card-eyebrow { font-family: "JetBrains Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .card-label { margin-top: 6px; font-family: "Instrument Serif", serif; font-size: 24px; font-style: italic; color: var(--ink); letter-spacing: -0.01em; }
+
+    .card-savings { display: flex; align-items: baseline; gap: 8px; margin-top: 22px; }
+    .card-pct { font-family: "Instrument Serif", serif; font-style: italic; font-size: 56px; line-height: 1; letter-spacing: -0.025em; }
+    .card-savings.is-pos .card-pct { background: linear-gradient(135deg, var(--grad-1), var(--grad-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .card-savings.is-neg .card-pct { color: var(--before); }
+    .card-pct-word { font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+
+    .card-numbers { margin-top: 22px; display: flex; align-items: center; gap: 12px; padding: 14px 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(0,0,0,0.18); }
+    .num-side { flex: 1; display: grid; gap: 4px; min-width: 0; }
+    .num-tag { font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-2); }
+    .num-val { font-family: "JetBrains Mono", monospace; font-size: 14.5px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .num-side.after .num-val { color: var(--after); }
+    .num-arrow { color: var(--muted-2); flex-shrink: 0; }
+
+    .card-bar { margin-top: 18px; }
+    .card-bar-track { height: 6px; background: rgba(255,255,255,0.04); border-radius: 999px; overflow: hidden; position: relative; }
+    .card-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--grad-1), var(--grad-2)); border-radius: 999px; transform-origin: left; animation: barGrow 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) 0.4s forwards; }
+    .card-bar-caption { display: block; margin-top: 8px; font-family: "JetBrains Mono", monospace; font-size: 10.5px; color: var(--muted); }
+
+    .card-detail { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.36s ease, margin-top 0.3s ease, opacity 0.3s ease; opacity: 0; margin-top: 0; }
+    .card-detail > * { overflow: hidden; }
+    .metric-card.is-open .card-detail { grid-template-rows: 1fr; opacity: 1; margin-top: 18px; }
+    .card-detail p { color: var(--ink-2); font-size: 13.5px; line-height: 1.55; padding-top: 14px; border-top: 1px dashed var(--border-strong); }
+    .card-detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 14px; background: var(--border); border-radius: 10px; overflow: hidden; }
+    .card-detail-item { background: var(--surface-2); padding: 10px 12px; display: grid; gap: 4px; }
+    .card-detail-item span { font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .card-detail-item strong { font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--ink); }
+
+    .card-cta { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; font-family: "JetBrains Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .card-cta-icon { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border-strong); display: inline-grid; place-items: center; transition: transform 0.3s ease, background 0.3s ease, color 0.3s ease; color: var(--ink-2); font-size: 13px; }
+    .metric-card.is-open .card-cta-icon { transform: rotate(45deg); background: var(--after-soft); color: var(--after); border-color: var(--after-line); }
+
+    .chart-block .legend { display: flex; gap: 18px; flex-wrap: wrap; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
+    .legend-dot.before { background: var(--before); }
+    .legend-dot.after { background: var(--after); }
+
+    .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 28px 28px 24px; }
+    .bar-row { padding: 22px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: opacity 0.25s ease; }
+    .bar-row:last-child { border-bottom: 0; }
+    .chart-card.has-focus .bar-row { opacity: 0.35; }
+    .chart-card.has-focus .bar-row.is-focused { opacity: 1; }
+    .bar-row-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+    .bar-row-label { font-family: "Instrument Serif", serif; font-style: italic; font-size: 22px; color: var(--ink); }
+    .bar-row-pct { font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 999px; }
+    .bar-row-pct.is-pos { background: var(--after-soft); color: var(--after); border: 1px solid var(--after-line); }
+    .bar-row-pct.is-neg { background: var(--before-soft); color: var(--before); border: 1px solid var(--before-line); }
+
+    .bar-row-tracks { display: grid; gap: 10px; }
+    .bar-track { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; gap: 14px; }
+    .bar-track-tag { font-family: "JetBrains Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .bar-track-bar { height: 28px; background: rgba(255,255,255,0.03); border-radius: 6px; overflow: hidden; position: relative; }
+    .bar-track-fill { height: 100%; width: 0%; border-radius: 6px; animation: barGrow 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) 0.3s forwards; }
+    .bar-track-fill.is-before { background: linear-gradient(90deg, rgba(255,130,100,0.85), var(--before)); }
+    .bar-track-fill.is-after { background: linear-gradient(90deg, var(--grad-1), var(--grad-2)); }
+    .bar-track-value { font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--ink); min-width: 90px; text-align: right; }
+
+    .files-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .files-col { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+    .files-col-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
+    .files-col-title { font-family: "Instrument Serif", serif; font-style: italic; font-size: 22px; color: var(--ink); }
+    .files-col-tag { font-family: "JetBrains Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .files-col-tag.before { color: var(--before); }
+    .files-col-tag.after { color: var(--after); }
+    .lf-row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(80px, 2fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+    .lf-row:last-child { border-bottom: 0; }
+    .lf-path { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lf-bar { height: 6px; background: rgba(255,255,255,0.04); border-radius: 999px; overflow: hidden; }
+    .lf-fill { height: 100%; width: 0%; border-radius: 999px; animation: barGrow 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) 0.5s forwards; }
+    .files-col.before .lf-fill { background: linear-gradient(90deg, rgba(255,130,100,0.7), var(--before)); }
+    .files-col.after .lf-fill { background: linear-gradient(90deg, var(--grad-1), var(--grad-2)); }
+    .lf-tokens { font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
+    .lf-tokens-unit { color: var(--muted-2); margin-left: 4px; font-size: 10.5px; }
+    .lf-empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+
+    .proj-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 32px; display: grid; gap: 26px; }
+    .proj-display { display: grid; gap: 8px; padding-bottom: 26px; border-bottom: 1px dashed var(--border-strong); }
+    .proj-label { font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .proj-amount { display: flex; align-items: baseline; gap: 4px; }
+    .proj-symbol { font-family: "Instrument Serif", serif; font-size: 44px; color: var(--muted); }
+    .proj-num { font-family: "Instrument Serif", serif; font-style: italic; font-size: clamp(64px, 9vw, 120px); line-height: 1; letter-spacing: -0.025em; background: linear-gradient(135deg, var(--grad-1), var(--grad-2), var(--grad-3)); -webkit-background-clip: text; background-clip: text; color: transparent; transition: opacity 0.3s ease; }
+    .proj-runs-line { font-family: "JetBrains Mono", monospace; font-size: 12.5px; color: var(--muted); }
+    .proj-runs-line strong { color: var(--ink); font-weight: 500; }
+
+    .proj-controls { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+    .proj-btn { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 12px; cursor: pointer; display: grid; gap: 4px; transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease; color: inherit; font: inherit; text-align: left; }
+    .proj-btn:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+    .proj-btn.is-active { background: linear-gradient(180deg, rgba(132,224,168,0.08), rgba(132,224,168,0.02)); border-color: var(--after-line); }
+    .proj-btn-num { font-family: "Instrument Serif", serif; font-style: italic; font-size: 22px; line-height: 1; color: var(--ink); }
+    .proj-btn.is-active .proj-btn-num { color: var(--after); }
+    .proj-btn-label { font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .proj-foot { font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--muted); }
+    .proj-foot strong { color: var(--ink); font-weight: 500; }
+
+    .measured-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+    .measured-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; display: grid; gap: 14px; }
+    .measured-card-label { font-family: "JetBrains Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .measured-card-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: baseline; padding-top: 4px; border-top: 1px dashed var(--border); }
+    .measured-card-row .v { font-family: "JetBrains Mono", monospace; font-size: 14px; }
+    .measured-card-row .v.before { color: var(--before); }
+    .measured-card-row .v.after { color: var(--after); }
+    .measured-card-row .arrow { color: var(--muted-2); }
+    .measured-card-pct { font-family: "Instrument Serif", serif; font-style: italic; font-size: 36px; line-height: 1; }
+    .measured-card-pct.is-pos { background: linear-gradient(135deg, var(--grad-1), var(--grad-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .measured-card-pct.is-neg { color: var(--before); }
+    .measured-card-pct.is-na { color: var(--muted); font-style: normal; font-family: "JetBrains Mono", monospace; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+    .measured-empty .block-sub { font-style: italic; }
+
+    .method-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; }
+    .method-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+    .method-card h3 { font-family: "Instrument Serif", serif; font-style: italic; font-size: 22px; color: var(--ink); margin-bottom: 14px; font-weight: 400; }
+    .method-card p { color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+    .method-card p + p { margin-top: 10px; }
+    .method-list { display: grid; gap: 6px; margin-top: 12px; }
+    .method-list li { list-style: none; padding-left: 20px; position: relative; color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+    .method-list li::before { content: "—"; position: absolute; left: 0; color: var(--muted-2); }
+    .method-row { display: grid; gap: 6px; padding: 14px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; margin-top: 14px; }
+    .method-row .k { font-family: "JetBrains Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .method-row .v { font-family: "JetBrains Mono", monospace; font-size: 12.5px; color: var(--ink); word-break: break-word; }
+
+    .footer { margin-top: 80px; padding-top: 28px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: end; }
+    .footer-info { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--muted); display: grid; gap: 6px; }
+    .footer-info code { font-family: "JetBrains Mono", monospace; color: var(--ink-2); }
+    .footer-mark { font-family: "Instrument Serif", serif; font-style: italic; font-size: 24px; color: var(--ink); }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
     }
-    .chart {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 18px;
-      margin-top: 16px;
+    @keyframes barGrow {
+      from { width: 0%; }
+      to { width: var(--target-w, 0%); }
     }
-    .note {
-      color: var(--muted);
-      line-height: 1.5;
-      margin-top: 18px;
+
+    @media (max-width: 920px) {
+      .hero-stats { grid-template-columns: repeat(2, 1fr); }
+      .files-grid, .method-grid { grid-template-columns: 1fr; }
+      .proj-controls { grid-template-columns: repeat(3, 1fr); }
     }
-    svg { width: 100%; height: auto; display: block; }
-    @media (max-width: 860px) {
-      main { padding: 18px; }
-      header, .pair { grid-template-columns: 1fr; display: grid; align-items: start; }
-      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    @media (max-width: 560px) {
+      .topbar { font-size: 10.5px; }
+      .hero { padding: 48px 0 24px; }
+      .hero-stats { grid-template-columns: 1fr 1fr; }
+      .bar-track { grid-template-columns: 60px 1fr; }
+      .bar-track-value { grid-column: 2 / 3; text-align: left; }
+      .proj-controls { grid-template-columns: repeat(2, 1fr); }
     }
   </style>
 </head>
 <body>
+  <div class="grain" aria-hidden="true"></div>
+
   <main>
-    <header>
-      <div>
-        <h1>BugCapsule Evaluation</h1>
-        <div class="sub">Exact-token context comparison for <strong>${escapeHtml(report.capsuleId)}</strong>. The before view is a deterministic full-repo context payload; the after view is the generated capsule context.</div>
+    <div class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">bugcapsule</span>
+        <span class="brand-divider">/</span>
+        <span class="brand-section">evaluation</span>
       </div>
-      <div class="badge">${escapeHtml(formatReductionLabel(report.contexts.savings.contextTokensPercent, "context tokens"))}</div>
-    </header>
+      <div class="topbar-meta">
+        <span class="meta-pill"><span class="k">capsule</span>${escapeHtml(report.capsuleId)}</span>
+        <span class="meta-pill"><span class="k">model</span>${escapeHtml(report.model)}</span>
+        <span class="meta-pill"><span class="k">tokenizer</span>${escapeHtml(report.tokenizer.encoding)}${report.tokenizer.exactForConfiguredModel ? " · exact" : ""}</span>
+        <span class="meta-pill"><span class="k">generated</span>${escapeHtml(generatedFormatted)}</span>
+      </div>
+    </div>
 
-    <section class="grid" aria-label="summary metrics">
-      <div class="card"><div class="label">Before tokens</div><div class="value">${formatNumber(report.contexts.fullRepo.contextTokens)}</div></div>
-      <div class="card"><div class="label">After tokens</div><div class="value">${formatNumber(report.contexts.bugCapsule.contextTokens)}</div></div>
-      <div class="card"><div class="label">Before files</div><div class="value">${formatNumber(report.contexts.fullRepo.fileCount)}</div></div>
-      <div class="card"><div class="label">After files</div><div class="value">${formatNumber(report.contexts.bugCapsule.fileCount)}</div></div>
+    <section class="hero">
+      <div class="hero-eyebrow">Deterministic context reduction</div>
+      <h1 class="hero-headline">
+        <span class="seg seg-1">A&nbsp;</span><em class="big-percent seg seg-2">${escapeHtml(formatPercent(Math.abs(c.savings.contextTokensPercent)))}</em><span class="seg seg-3">&nbsp;${c.savings.contextTokensPercent >= 0 ? "smaller debugging context." : "larger debugging context."}</span>
+      </h1>
+      <p class="hero-lede">The capsule replaces the full-repository context an unscoped agent would otherwise ingest with a deterministic, executable reproduction of the exact failure — keeping only the files needed to surface the bug.</p>
+
+      <div class="hero-stats">
+        <div>
+          <div class="hero-stat-label">tokens removed</div>
+          <div class="hero-stat-value">${escapeHtml(formatNumber(tokensSaved))}</div>
+          <div class="hero-stat-sub">${escapeHtml(formatNumber(beforeTokens))} → ${escapeHtml(formatNumber(afterTokens))}</div>
+        </div>
+        <div>
+          <div class="hero-stat-label">files dropped</div>
+          <div class="hero-stat-value">${escapeHtml(formatNumber(filesSaved))}</div>
+          <div class="hero-stat-sub">${escapeHtml(formatNumber(beforeFiles))} → ${escapeHtml(formatNumber(afterFiles))}</div>
+        </div>
+        <div>
+          <div class="hero-stat-label">storage pruned</div>
+          <div class="hero-stat-value">${escapeHtml(formatBytes(bytesSaved))}</div>
+          <div class="hero-stat-sub">${escapeHtml(formatBytes(beforeBytes))} → ${escapeHtml(formatBytes(afterBytes))}</div>
+        </div>
+        <div>
+          <div class="hero-stat-label">size ratio</div>
+          <div class="hero-stat-value">1 : ${ratio}</div>
+          <div class="hero-stat-sub">capsule : repo</div>
+        </div>
+      </div>
     </section>
 
-    <section class="chart">
-      ${svg}
-    </section>
-
-    <section class="pair">
-      <div>
-        <h2>Deterministic Context Metrics</h2>
-        ${renderContextTable(report)}
-      </div>
-      <div>
-        <h2>Measured Fix Usage</h2>
-        ${measured ? renderMeasuredUsageTable(measured) : `<p class="note">${escapeHtml(report.methodology.actualFixCost)}</p>`}
+    <section class="block" id="metrics">
+      <header class="block-head">
+        <div class="block-eyebrow">— side-by-side metrics</div>
+        <h2 class="block-title">Click any card to <em>learn what it measures</em></h2>
+        <p class="block-sub">Each card compares the unscoped baseline to the generated capsule and reveals the underlying definition on tap.</p>
+      </header>
+      <div class="bento-grid">${cardsHtml}
       </div>
     </section>
 
-    <p class="note">${escapeHtml(report.methodology.contextBaseline)}</p>
-    <p class="note">Payload hashes: before <code>${report.contexts.fullRepo.payloadSha256}</code>, after <code>${report.contexts.bugCapsule.payloadSha256}</code>.</p>
+    <section class="block chart-block" id="comparison">
+      <header class="block-head">
+        <div class="block-eyebrow">— comparison breakdown</div>
+        <h2 class="block-title">Before <em>vs</em> after</h2>
+        <p class="block-sub">Hover or tap a row to isolate it. Bars are scaled to the unscoped baseline within each metric.</p>
+        <div class="legend"><span><span class="legend-dot before"></span>Without capsule</span><span><span class="legend-dot after"></span>With capsule</span></div>
+      </header>
+      <div class="chart-card">${chartRowsHtml}
+      </div>
+    </section>
+
+    <section class="block files-block" id="files">
+      <header class="block-head">
+        <div class="block-eyebrow">— largest files in context</div>
+        <h2 class="block-title">What's in the <em>payload</em>?</h2>
+        <p class="block-sub">The biggest token contributors on each side. Bars are scaled to the global maximum so the visual size difference is meaningful.</p>
+      </header>
+      <div class="files-grid">
+        <div class="files-col before">
+          <div class="files-col-head">
+            <div class="files-col-title">Without capsule</div>
+            <div class="files-col-tag before">full repo · top ${repoTop.length}</div>
+          </div>
+          ${renderLargeList(repoTop, "No files indexed for this side.")}
+        </div>
+        <div class="files-col after">
+          <div class="files-col-head">
+            <div class="files-col-title">With capsule</div>
+            <div class="files-col-tag after">capsule · top ${capsuleTop.length}</div>
+          </div>
+          ${renderLargeList(capsuleTop, "No files indexed for this side.")}
+        </div>
+      </div>
+    </section>
+
+    ${projectionHtml}
+
+    ${measuredHtml}
+
+    <section class="block method-block" id="method">
+      <header class="block-head">
+        <div class="block-eyebrow">— methodology &amp; provenance</div>
+        <h2 class="block-title">How we <em>measured</em> this</h2>
+      </header>
+      <div class="method-grid">
+        <div class="method-card">
+          <h3>Context baseline</h3>
+          <p>${escapeHtml(report.methodology.contextBaseline)}</p>
+          <p>${escapeHtml(report.methodology.actualFixCost)}</p>
+        </div>
+        <div class="method-card">
+          <h3>Original failure</h3>
+          <div class="method-row"><span class="k">repro command</span><span class="v">${escapeHtml(report.originalRepro.command)}</span></div>
+          <div class="method-row"><span class="k">failure summary</span><span class="v">${escapeHtml(report.originalRepro.failureSummary)}</span></div>
+        </div>
+        <div class="method-card">
+          <h3>Excluded by default</h3>
+          <ul class="method-list">${exclusionsHtml}</ul>
+        </div>
+        <div class="method-card">
+          <h3>Payload provenance</h3>
+          <div class="method-row"><span class="k">before · sha256</span><span class="v">${escapeHtml(c.fullRepo.payloadSha256)}</span></div>
+          <div class="method-row"><span class="k">after · sha256</span><span class="v">${escapeHtml(c.bugCapsule.payloadSha256)}</span></div>
+          <div class="method-row"><span class="k">repo path</span><span class="v">${escapeHtml(report.repoPath)}</span></div>
+          <div class="method-row"><span class="k">capsule path</span><span class="v">${escapeHtml(report.capsulePath)}</span></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="footer-info">
+        <span>Schema v${escapeHtml(report.schemaVersion)} · generated ${escapeHtml(generatedFormatted)}</span>
+        <span>Tokenizer: ${escapeHtml(report.tokenizer.kind)} · ${escapeHtml(report.tokenizer.encoding)}${report.tokenizer.exactForConfiguredModel ? " (exact for configured model)" : ""}</span>
+      </div>
+      <div class="footer-mark">bugcapsule</div>
+    </footer>
   </main>
+
+  <script>
+    (function () {
+      var cards = document.querySelectorAll(".metric-card");
+      for (var i = 0; i < cards.length; i++) {
+        cards[i].addEventListener("click", function (e) {
+          var open = this.classList.toggle("is-open");
+          this.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+      }
+
+      var chartCard = document.querySelector(".chart-card");
+      var rows = document.querySelectorAll(".bar-row");
+      for (var j = 0; j < rows.length; j++) {
+        rows[j].addEventListener("click", function (e) {
+          var alreadyFocused = this.classList.contains("is-focused");
+          for (var k = 0; k < rows.length; k++) rows[k].classList.remove("is-focused");
+          if (alreadyFocused) {
+            chartCard && chartCard.classList.remove("has-focus");
+          } else {
+            this.classList.add("is-focused");
+            chartCard && chartCard.classList.add("has-focus");
+          }
+        });
+      }
+
+      var projButtons = document.querySelectorAll(".proj-btn");
+      var projNum = document.querySelector(".proj-num");
+      var projRuns = document.querySelector(".proj-runs");
+      var projRunsNoun = document.querySelector(".proj-runs-noun");
+      function formatProjCost(value) {
+        var abs = Math.abs(value);
+        var decimals = abs >= 100 ? 0 : abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6;
+        var formatter = new Intl.NumberFormat("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+        return formatter.format(value);
+      }
+      for (var p = 0; p < projButtons.length; p++) {
+        projButtons[p].addEventListener("click", function () {
+          for (var q = 0; q < projButtons.length; q++) {
+            projButtons[q].classList.remove("is-active");
+            projButtons[q].setAttribute("aria-selected", "false");
+          }
+          this.classList.add("is-active");
+          this.setAttribute("aria-selected", "true");
+          if (!projNum) return;
+          var mul = parseFloat(this.getAttribute("data-multiplier")) || 1;
+          var base = parseFloat(projNum.getAttribute("data-base")) || 0;
+          var total = base * mul;
+          projNum.style.opacity = "0.4";
+          window.setTimeout(function () {
+            projNum.textContent = formatProjCost(total);
+            projNum.setAttribute("data-multiplier", String(mul));
+            projNum.style.opacity = "1";
+            if (projRuns) projRuns.textContent = mul.toLocaleString("en-US");
+            if (projRunsNoun) projRunsNoun.textContent = mul === 1 ? "run" : "runs";
+          }, 140);
+        });
+      }
+
+      var pctEls = document.querySelectorAll(".card-pct");
+      for (var pi = 0; pi < pctEls.length; pi++) {
+        (function (el) {
+          var target = parseFloat(el.getAttribute("data-target") || "0");
+          var sign = target < 0 ? -1 : 1;
+          var abs = Math.abs(target);
+          var duration = 1100;
+          var start = 0;
+          var startTs = 0;
+          function frame(ts) {
+            if (!startTs) startTs = ts;
+            var t = Math.min(1, (ts - startTs) / duration);
+            var eased = 1 - Math.pow(1 - t, 3);
+            var current = start + (abs - start) * eased;
+            el.textContent = current.toFixed(1) + "%";
+            if (t < 1) requestAnimationFrame(frame);
+            else el.textContent = abs.toFixed(1) + "%";
+          }
+          requestAnimationFrame(frame);
+        })(pctEls[pi]);
+      }
+    })();
+  </script>
 </body>
 </html>
 `;
 }
 
-function renderContextTable(report: EvaluationReport): string {
-  return `<table>
-    <thead><tr><th>Metric</th><th>Before</th><th>After</th><th>Savings</th></tr></thead>
-    <tbody>
-      <tr><td>Files</td><td>${formatNumber(report.contexts.fullRepo.fileCount)}</td><td>${formatNumber(report.contexts.bugCapsule.fileCount)}</td><td>${formatPercent(report.contexts.savings.filesPercent)}</td></tr>
-      <tr><td>Bytes</td><td>${formatNumber(report.contexts.fullRepo.byteCount)}</td><td>${formatNumber(report.contexts.bugCapsule.byteCount)}</td><td>${formatPercent(report.contexts.savings.bytesPercent)}</td></tr>
-      <tr><td>Source tokens</td><td>${formatNumber(report.contexts.fullRepo.sourceTokens)}</td><td>${formatNumber(report.contexts.bugCapsule.sourceTokens)}</td><td>${formatPercent(report.contexts.savings.sourceTokensPercent)}</td></tr>
-      <tr><td>Context payload tokens</td><td>${formatNumber(report.contexts.fullRepo.contextTokens)}</td><td>${formatNumber(report.contexts.bugCapsule.contextTokens)}</td><td>${formatPercent(report.contexts.savings.contextTokensPercent)}</td></tr>
-      <tr><td>Input-context cost</td><td>${formatCost(report.contexts.fullRepo.contextInputCostUsd)}</td><td>${formatCost(report.contexts.bugCapsule.contextInputCostUsd)}</td><td>${formatNullablePercent(report.contexts.savings.contextInputCostPercent)}</td></tr>
-    </tbody>
-  </table>`;
-}
-
-function renderMeasuredUsageTable(measured: NonNullable<EvaluationReport["measuredUsage"]>): string {
-  return `<table>
-    <thead><tr><th>Metric</th><th>Before</th><th>After</th><th>Savings</th></tr></thead>
-    <tbody>
-      <tr><td>Input tokens</td><td>${formatNumber(measured.withoutBugCapsule?.inputTokens)}</td><td>${formatNumber(measured.withBugCapsule?.inputTokens)}</td><td>${formatNullablePercent(measured.savings?.inputTokensPercent)}</td></tr>
-      <tr><td>Output tokens</td><td>${formatNumber(measured.withoutBugCapsule?.outputTokens)}</td><td>${formatNumber(measured.withBugCapsule?.outputTokens)}</td><td>${formatNullablePercent(measured.savings?.outputTokensPercent)}</td></tr>
-      <tr><td>Total tokens</td><td>${formatNumber(measured.withoutBugCapsule?.totalTokens)}</td><td>${formatNumber(measured.withBugCapsule?.totalTokens)}</td><td>${formatNullablePercent(measured.savings?.totalTokensPercent)}</td></tr>
-      <tr><td>Listed-price cost</td><td>${formatCost(measured.withoutBugCapsule?.listedCostUsd ?? null)}</td><td>${formatCost(measured.withBugCapsule?.listedCostUsd ?? null)}</td><td>${formatNullablePercent(measured.savings?.listedCostPercent)}</td></tr>
-    </tbody>
-  </table>`;
-}
-
-function renderSvg(report: EvaluationReport): string {
-  const width = 1320;
-  const height = 820;
-  const chartLeft = 110;
-  const chartTop = 260;
-  const rowHeight = 135;
-  const maxBarWidth = 860;
-  const metrics = [
-    {
-      label: "Context tokens",
-      before: report.contexts.fullRepo.contextTokens,
-      after: report.contexts.bugCapsule.contextTokens,
-      savings: report.contexts.savings.contextTokensPercent,
-      valueFormat: formatNumber
-    },
-    {
-      label: "Source tokens",
-      before: report.contexts.fullRepo.sourceTokens,
-      after: report.contexts.bugCapsule.sourceTokens,
-      savings: report.contexts.savings.sourceTokensPercent,
-      valueFormat: formatNumber
-    },
-    {
-      label: "Files",
-      before: report.contexts.fullRepo.fileCount,
-      after: report.contexts.bugCapsule.fileCount,
-      savings: report.contexts.savings.filesPercent,
-      valueFormat: formatNumber
-    },
-    {
-      label: "Input-context cost",
-      before: report.contexts.fullRepo.contextInputCostUsd ?? 0,
-      after: report.contexts.bugCapsule.contextInputCostUsd ?? 0,
-      savings: report.contexts.savings.contextInputCostPercent ?? 0,
-      valueFormat: (value: number | undefined) => formatCost(value ?? null)
-    }
-  ].filter((metric) => metric.label !== "Input-context cost" || report.contexts.fullRepo.contextInputCostUsd !== null);
-  const maxValue = Math.max(...metrics.flatMap((metric) => [metric.before, metric.after]), 1);
-
-  const rows = metrics.map((metric, index) => {
-    const y = chartTop + index * rowHeight;
-    const beforeWidth = Math.max(2, metric.before / maxValue * maxBarWidth);
-    const afterWidth = Math.max(2, metric.after / maxValue * maxBarWidth);
-    return `
-    <text x="${chartLeft}" y="${y}" class="row-label">${escapeXml(metric.label)}</text>
-    <rect x="${chartLeft}" y="${y + 18}" width="${beforeWidth}" height="32" rx="5" fill="#d54b4b"/>
-    <rect x="${chartLeft}" y="${y + 58}" width="${afterWidth}" height="32" rx="5" fill="#257b63"/>
-    <text x="${chartLeft + beforeWidth + 14}" y="${y + 41}" class="bar-value">${escapeXml(metric.valueFormat(metric.before))}</text>
-    <text x="${chartLeft + afterWidth + 14}" y="${y + 81}" class="bar-value">${escapeXml(metric.valueFormat(metric.after))}</text>
-    <text x="${chartLeft + maxBarWidth + 120}" y="${y + 62}" class="saving" style="fill: ${metric.savings >= 0 ? "#257b63" : "#d54b4b"}">${escapeXml(formatPercent(metric.savings))}</text>`;
-  }).join("");
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="BugCapsule before and after evaluation">
-  <style>
-    .title { font: 800 44px Inter, Arial, sans-serif; fill: #18202a; }
-    .subtitle { font: 500 19px Inter, Arial, sans-serif; fill: #657286; }
-    .metric-label { font: 700 16px Inter, Arial, sans-serif; fill: #657286; text-transform: uppercase; }
-    .metric-value { font: 800 34px Inter, Arial, sans-serif; fill: #18202a; }
-    .legend { font: 700 17px Inter, Arial, sans-serif; fill: #18202a; }
-    .row-label { font: 800 22px Inter, Arial, sans-serif; fill: #18202a; }
-    .bar-value { font: 700 18px Inter, Arial, sans-serif; fill: #18202a; }
-    .saving { font: 800 25px Inter, Arial, sans-serif; fill: #257b63; text-anchor: middle; }
-    .note { font: 500 16px Inter, Arial, sans-serif; fill: #657286; }
-  </style>
-  <rect width="${width}" height="${height}" fill="#f6f7f9"/>
-  <text x="72" y="78" class="title">BugCapsule Evaluation</text>
-  <text x="74" y="116" class="subtitle">Before: full repository debug context. After: generated executable capsule.</text>
-  <text x="74" y="148" class="subtitle">Capsule ${escapeXml(report.capsuleId)} using ${escapeXml(report.model)} / ${escapeXml(report.tokenizer.encoding)}</text>
-
-  <rect x="72" y="178" width="265" height="62" rx="8" fill="#ffffff" stroke="#d9dee7"/>
-  <text x="92" y="203" class="metric-label">Before tokens</text>
-  <text x="92" y="231" class="metric-value">${escapeXml(formatNumber(report.contexts.fullRepo.contextTokens))}</text>
-  <rect x="357" y="178" width="265" height="62" rx="8" fill="#ffffff" stroke="#d9dee7"/>
-  <text x="377" y="203" class="metric-label">After tokens</text>
-  <text x="377" y="231" class="metric-value">${escapeXml(formatNumber(report.contexts.bugCapsule.contextTokens))}</text>
-  <rect x="642" y="178" width="310" height="62" rx="8" fill="#ffffff" stroke="#d9dee7"/>
-  <text x="662" y="203" class="metric-label">Context savings</text>
-  <text x="662" y="231" class="metric-value">${escapeXml(formatPercent(report.contexts.savings.contextTokensPercent))}</text>
-
-  <circle cx="114" cy="252" r="7" fill="#d54b4b"/><text x="130" y="258" class="legend">Without BugCapsule</text>
-  <circle cx="342" cy="252" r="7" fill="#257b63"/><text x="358" y="258" class="legend">With BugCapsule</text>
-  <text x="${chartLeft + maxBarWidth + 120}" y="258" class="legend" text-anchor="middle">Savings</text>
-
-  ${rows}
-
-  <text x="74" y="780" class="note">Exact tokenizer count for the deterministic context payload. Actual no-BugCapsule fix cost requires a measured baseline agent run.</text>
-</svg>
-`;
+function renderMeasuredCard(label: string, before: string, after: string, pct: number | null | undefined): string {
+  const pctClass = pct === null || pct === undefined ? "is-na" : pct >= 0 ? "is-pos" : "is-neg";
+  const pctText = pct === null || pct === undefined ? "not measured" : formatPercent(Math.abs(pct));
+  return `
+          <div class="measured-card">
+            <div class="measured-card-label">${escapeHtml(label)}</div>
+            <div class="measured-card-pct ${pctClass}">${escapeHtml(pctText)}</div>
+            <div class="measured-card-row">
+              <span class="v before">${escapeHtml(before)}</span>
+              <span class="arrow">→</span>
+              <span class="v after">${escapeHtml(after)}</span>
+            </div>
+          </div>`;
 }
 
 function savingsPercent(before: number, after: number): number {
@@ -1061,6 +1523,22 @@ function formatCost(value: number | null): string {
   }
   const decimals = Math.abs(value) >= 1 ? 2 : Math.abs(value) >= 0.01 ? 4 : 6;
   return `$${value.toFixed(decimals)}`;
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value < 0) {
+    return "0 B";
+  }
+  if (value < 1024) {
+    return `${Math.round(value)} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  if (value < 1024 * 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function sha256(value: string): string {
