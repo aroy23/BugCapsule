@@ -1,0 +1,27 @@
+{
+  "name": "@bugcapsule/core",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "diff": "^8.0.2",
+    "fast-glob": "^3.3.3",
+    "minimatch": "^10.0.3",
+    "ts-morph": "^28.0.0"
+  }
+}
