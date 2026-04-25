@@ -69,7 +69,7 @@ async function testCandidates(
     return {
       command: `npm test -- ${filter}`,
       kind: "test" as const,
-      confidence: confidence(score, tokens, 0.52),
+      confidence: confidence(score, tokens, 0.68),
       reason: score > 0
         ? `Test file name matches bug terms: ${normalized}`
         : `Existing test can be tried as a repro: ${normalized}`,
@@ -90,7 +90,7 @@ function packageScriptCandidates(packageJson: PackageJson, tokens: Set<string>):
       return {
         command: `npm run ${name}`,
         kind,
-        confidence: confidence(score, tokens, kind === "runtime_script" ? 0.58 : 0.44),
+        confidence: confidence(score, tokens, kind === "runtime_script" ? 0.55 : 0.44),
         reason: /repro/i.test(name)
           ? `Package script is explicitly named as a repro: ${name}`
           : `Package script may exercise the bug path: ${name}`,

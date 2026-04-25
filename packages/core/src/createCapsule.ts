@@ -15,6 +15,7 @@ import type { BugCapsuleManifest, BugCapsuleReport, CapsuleFileMapping, CreateCa
 
 type PackageJson = {
   name?: string;
+  scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
 };
@@ -101,7 +102,7 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
     });
   }
 
-  const packageContent = await renderCapsulePackage(repoPath, project.testRunner, capsuleId);
+  const packageContent = await renderCapsulePackage(repoPath, project.testRunner, capsuleId, options.command);
   const packageHash = hashString(packageContent);
   await writeTextFile(path.join(capsulePath, "package.json"), packageContent);
   fileMappings.push({
@@ -225,14 +226,14 @@ async function resolveCapsuleId(repoPath: string, options: CreateCapsuleOptions)
   return candidate;
 }
 
-async function renderCapsulePackage(repoPath: string, testRunner: string, capsuleId: string): Promise<string> {
+async function renderCapsulePackage(repoPath: string, testRunner: string, capsuleId: string, originalCommand: string): Promise<string> {
   const sourcePackage = await readJsonFile<PackageJson>(path.join(repoPath, "package.json"));
   const devDependencies = {
     typescript: sourcePackage.devDependencies?.typescript ?? "^6.0.3",
     vitest: sourcePackage.devDependencies?.vitest ?? "^4.1.5",
     tsx: sourcePackage.devDependencies?.tsx ?? "^4.20.0"
   };
-  const testCommand = testRunner === "jest" ? "jest" : "vitest run";
+  const testCommand = capsuleTestScript(sourcePackage, testRunner, originalCommand);
   const packageJson = {
     name: `bugcapsule-${capsuleId}`,
     private: true,
@@ -245,6 +246,30 @@ async function renderCapsulePackage(repoPath: string, testRunner: string, capsul
   };
 
   return `${JSON.stringify(packageJson, null, 2)}\n`;
+}
+
+function capsuleTestScript(sourcePackage: PackageJson, testRunner: string, originalCommand: string): string {
+  const npmRunMatch = originalCommand.match(/^npm\s+run\s+([^\s]+)(?:\s+--\s*(.*))?$/);
+
+  if (npmRunMatch) {
+    const scriptName = npmRunMatch[1];
+    const passthroughArgs = npmRunMatch[2];
+    const sourceScript = scriptName ? sourcePackage.scripts?.[scriptName] : undefined;
+
+    if (sourceScript) {
+      return passthroughArgs ? `${sourceScript} -- ${passthroughArgs}` : sourceScript;
+    }
+  }
+
+  if (/^(?:npx\s+)?vitest\b|^npm\s+test\b/.test(originalCommand)) {
+    return testRunner === "jest" ? "jest" : "vitest run";
+  }
+
+  if (/^(?:node|tsx)\s+/.test(originalCommand)) {
+    return originalCommand;
+  }
+
+  return testRunner === "jest" ? "jest" : "vitest run";
 }
 
 function renderCapsuleTsconfig(): string {
