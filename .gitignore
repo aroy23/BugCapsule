@@ -3,4 +3,6 @@ dist/
 coverage/
 .DS_Store
 .bugcapsule/
+.tmp/
+.tmp-tests/
 *.log
