@@ -21,14 +21,23 @@ Use this skill when:
 
 ## Minimal user request
 
-The user does not need to provide a long workflow. If they provide a repo path and failing command, proceed without asking for more BugCapsule instructions.
+The user does not need to provide a long workflow. Treat short prompts that contain a repo path plus either a failing command or a local URL/symptom as enough context to start BugCapsule.
 
-Example:
+Command example:
 
 ```text
 Use BugCapsule to fix this.
 repoPath: /path/to/repo
 command: npm test -- checkout-missing-shipping-address
+```
+
+Runtime example:
+
+```text
+Use BugCapsule to fix this.
+/path/to/repo
+http://localhost:4177
+The checkout button does not work.
 ```
 
 If the user only describes a website/runtime bug and gives a local URL, call `bugcapsule_create_from_runtime` with the repo path, URL, and broad symptom. It will probe the page, generate a hidden repro, and create a capsule without requiring a hand-written test command. If there is no URL, call `bugcapsule_suggest_repro` with the repo path, bug description, and any visible error text.

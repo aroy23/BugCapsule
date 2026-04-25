@@ -33,10 +33,10 @@ The MCP tool returns an `agentWorkflow` with the capsule path, repro command, ed
 If the user only knows the app behavior, provide the local URL and a broad symptom:
 
 ```text
-Use BugCapsule to fix this runtime bug.
-repoPath: /Users/arnav/Desktop/Demo
-url: http://localhost:4177
-symptom: the Complete Checkout button does not work
+Use BugCapsule to fix this.
+/Users/arnav/Desktop/Demo
+http://localhost:4177
+The Complete Checkout button does not work.
 ```
 
 `bugcapsule_create_from_runtime` probes same-origin page interactions, captures the server stack, writes a hidden `.bugcapsule/repros/*` repro, and creates the capsule from that generated repro. `bugcapsule_suggest_repro` remains useful when the user does not know whether a command or runtime URL is available.
