@@ -256,7 +256,7 @@ async function main(): Promise<void> {
     },
     methodology: {
       deterministicContextComparison: true,
-      contextBaseline: "The before number is a deterministic, exact-token full-repo context payload built from text source/config/docs files. It is not a claim that an agent would always read every file.",
+      contextBaseline: "The before number is a deterministic, exact-token full-repo context payload built from text source/config/docs files.",
       actualFixCost: measuredUsage
         ? "Measured usage was loaded from supplied provider/harness logs."
         : "Not measured. Exact no-BugCapsule fix cost requires running the same instrumented agent on the same bug without BugCapsule and recording provider usage.",
@@ -1006,14 +1006,7 @@ function renderHtml(report: EvaluationReport): string {
           ${renderMeasuredCard("Total tokens", formatNumber(measured.withoutBugCapsule?.totalTokens), formatNumber(measured.withBugCapsule?.totalTokens), measured.savings?.totalTokensPercent)}
           ${renderMeasuredCard("Listed cost", formatCost(measured.withoutBugCapsule?.listedCostUsd ?? null), formatCost(measured.withBugCapsule?.listedCostUsd ?? null), measured.savings?.listedCostPercent)}
         </div>
-      </section>` : `
-      <section class="block measured-block measured-empty">
-        <header class="block-head">
-          <div class="block-eyebrow">— measured agent usage</div>
-          <h2 class="block-title">Awaiting <em>real runs</em></h2>
-          <p class="block-sub">${escapeHtml(report.methodology.actualFixCost)}</p>
-        </header>
-      </section>`;
+      </section>` : "";
 
   const exclusionsHtml = report.methodology.excludedByDefault.map((e) => `<li>${escapeHtml(e)}</li>`).join("");
 
@@ -1617,6 +1610,11 @@ function renderHtml(report: EvaluationReport): string {
     .method-row { display: grid; gap: 6px; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; margin-top: 12px; }
     .method-row .k { font-family: "JetBrains Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
     .method-row .v { font-family: "JetBrains Mono", monospace; font-size: 12.5px; color: var(--ink); word-break: break-all; line-height: 1.5; }
+    .method-tip { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 8px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--muted); font-family: "Instrument Serif", serif; font-style: italic; font-size: 12px; line-height: 1; cursor: help; position: relative; vertical-align: middle; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+    .method-tip:hover, .method-tip:focus-visible { background: var(--ink); color: var(--bg); border-color: var(--ink); outline: none; }
+    .method-tip::after { content: attr(data-tip); position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); width: 280px; padding: 12px 14px; background: var(--ink); color: var(--bg); font-family: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif; font-style: normal; font-size: 12px; line-height: 1.55; letter-spacing: -0.005em; text-align: left; text-transform: none; border-radius: 8px; box-shadow: 0 8px 24px rgba(28, 26, 23, 0.18); opacity: 0; pointer-events: none; transition: opacity 0.15s ease; z-index: 10; }
+    .method-tip::before { content: ""; position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-bottom-color: var(--ink); opacity: 0; transition: opacity 0.15s ease; pointer-events: none; }
+    .method-tip:hover::after, .method-tip:hover::before, .method-tip:focus-visible::after, .method-tip:focus-visible::before { opacity: 1; }
 
     .footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; }
     .footer-info { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--muted); display: grid; gap: 4px; line-height: 1.5; }
@@ -1785,7 +1783,6 @@ function renderHtml(report: EvaluationReport): string {
         <div class="method-card">
           <h3>Context baseline</h3>
           <p>${escapeHtml(report.methodology.contextBaseline)}</p>
-          <p>${escapeHtml(report.methodology.actualFixCost)}</p>
         </div>
         <div class="method-card">
           <h3>Original failure</h3>
@@ -1797,7 +1794,7 @@ function renderHtml(report: EvaluationReport): string {
           <ul class="method-list">${exclusionsHtml}</ul>
         </div>
         <div class="method-card">
-          <h3>Payload provenance</h3>
+          <h3>Payload provenance <span class="method-tip" tabindex="0" role="tooltip" aria-label="What is payload provenance?" data-tip="SHA-256 is a cryptographic fingerprint of the exact payload bytes. Identical inputs always produce identical hashes, so anyone re-running the evaluator on the same repo state gets the same digest — proving the before/after numbers are reproducible and untampered.">i</span></h3>
           <div class="method-row"><span class="k">before · sha256</span><span class="v">${escapeHtml(c.fullRepo.payloadSha256)}</span></div>
           <div class="method-row"><span class="k">after · sha256</span><span class="v">${escapeHtml(c.bugCapsule.payloadSha256)}</span></div>
           <div class="method-row"><span class="k">repo path</span><span class="v">${escapeHtml(report.repoPath)}</span></div>
