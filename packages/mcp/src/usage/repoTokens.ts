@@ -45,6 +45,13 @@ const SKIP_DIRECTORIES = new Set([
   ".svelte-kit"
 ]);
 
+const LOCKFILES = new Set([
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "bun.lockb"
+]);
+
 const MAX_FILE_BYTES = 1 * 1024 * 1024;
 
 export async function estimateRepoTokens(repoPath: string): Promise<number> {
@@ -85,6 +92,9 @@ async function walk(
       if (SKIP_DIRECTORIES.has(entry.name)) {
         continue;
       }
+      if (isGeneratedRuntimeLineagePath(entryPath)) {
+        continue;
+      }
       if (options.skipBugCapsule && entry.name === ".bugcapsule") {
         continue;
       }
@@ -96,13 +106,26 @@ async function walk(
       continue;
     }
 
-    const ext = path.extname(entry.name).toLowerCase();
-    if (!TEXT_EXTENSIONS.has(ext)) {
+    if (!shouldIncludeFile(entryPath, entry.name)) {
       continue;
     }
 
     await onFile(entryPath);
   }
+}
+
+function shouldIncludeFile(filePath: string, fileName: string): boolean {
+  if (isGeneratedRuntimeLineagePath(filePath)) {
+    return false;
+  }
+  if (LOCKFILES.has(fileName)) {
+    return false;
+  }
+  return TEXT_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+}
+
+function isGeneratedRuntimeLineagePath(filePath: string): boolean {
+  return /(?:^|[/\\])\.bugcapsule[/\\]repros[/\\][^/\\]+\.lineage(?:[/\\]|$|\.json$)/.test(filePath);
 }
 
 async function tokensForFile(filePath: string): Promise<number> {

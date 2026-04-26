@@ -260,6 +260,7 @@ async function main(): Promise<void> {
         "build/cache/coverage directories",
         ".git",
         ".bugcapsule for the full-repo baseline",
+        "generated runtime lineage artifacts",
         "lockfiles unless --include-lockfiles is passed",
         "files larger than 1 MiB"
       ]
@@ -495,6 +496,9 @@ async function walk(
       if (SKIP_DIRECTORIES.has(entry.name)) {
         continue;
       }
+      if (isGeneratedRuntimeLineagePath(relativePath)) {
+        continue;
+      }
       if (options.skipBugCapsule && entry.name === ".bugcapsule") {
         continue;
       }
@@ -505,7 +509,7 @@ async function walk(
     if (!entry.isFile()) {
       continue;
     }
-    if (!shouldIncludeFile(entry.name, options.includeLockfiles)) {
+    if (!shouldIncludeFile(relativePath, options.includeLockfiles)) {
       continue;
     }
 
@@ -525,11 +529,20 @@ async function walk(
   }
 }
 
-function shouldIncludeFile(fileName: string, includeLockfiles: boolean): boolean {
+function shouldIncludeFile(relativePath: string, includeLockfiles: boolean): boolean {
+  if (isGeneratedRuntimeLineagePath(relativePath)) {
+    return false;
+  }
+
+  const fileName = path.basename(relativePath);
   if (!includeLockfiles && LOCKFILES.has(fileName)) {
     return false;
   }
   return TEXT_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+}
+
+function isGeneratedRuntimeLineagePath(relativePath: string): boolean {
+  return /(?:^|\/)\.bugcapsule\/repros\/[^/]+\.lineage(?:\/|$|\.json$)/.test(relativePath);
 }
 
 function renderContextPayload(options: {
@@ -781,7 +794,8 @@ function renderHtml(report: EvaluationReport): string {
   const afterCost = c.bugCapsule.contextInputCostUsd;
   const costAvailable = beforeCost !== null && afterCost !== null;
   const costSaved = costAvailable ? Math.max(0, (beforeCost ?? 0) - (afterCost ?? 0)) : null;
-  const ratio = afterTokens > 0 ? Math.max(1, Math.round(beforeTokens / afterTokens)) : 0;
+  const capsuleRepoRatio = beforeTokens > 0 ? afterTokens / beforeTokens : null;
+  const capsuleRepoRatioLabel = capsuleRepoRatio === null ? "n/a" : `${formatRatio(capsuleRepoRatio)} : 1`;
   const generatedFormatted = report.generatedAt.replace("T", " ").slice(0, 19) + " UTC";
 
   const cards: CardData[] = [
@@ -1308,8 +1322,8 @@ function renderHtml(report: EvaluationReport): string {
         </div>
         <div>
           <div class="hero-stat-label">size ratio</div>
-          <div class="hero-stat-value">1 : ${ratio}</div>
-          <div class="hero-stat-sub">capsule : repo</div>
+          <div class="hero-stat-value">${escapeHtml(capsuleRepoRatioLabel)}</div>
+          <div class="hero-stat-sub">capsule tokens : repo tokens</div>
         </div>
       </div>
     </section>
@@ -1513,6 +1527,13 @@ function formatNumber(value: number | undefined): string {
 
 function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
+}
+
+function formatRatio(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "n/a";
+  }
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
 }
 
 function formatReductionLabel(value: number, noun: string): string {
