@@ -12,6 +12,7 @@ import { detectProject } from "./projectDetector.js";
 import { runShellCommand } from "./shell.js";
 import { selectSlice } from "./slicer.js";
 import { assertInsideRoot, normalizePath, slugify } from "./pathUtils.js";
+import { initializeWorkflow, workflowMetadataFor } from "./workflow.js";
 import type { AdditionalCapsuleFile, BugCapsuleManifest, CapsuleFileMapping, CapsuleRunScript, CreateCapsuleOptions, CreateCapsuleResult } from "./types.js";
 
 type PackageJson = {
@@ -125,7 +126,7 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
 
   const originalFiles = await listProjectFiles(repoPath);
   const manifest: BugCapsuleManifest = {
-    schemaVersion: "0.1",
+    schemaVersion: "0.2",
     capsuleId,
     name: options.capsuleName ?? capsuleId,
     createdAt: new Date().toISOString(),
@@ -169,11 +170,13 @@ export async function createCapsule(options: CreateCapsuleOptions): Promise<Crea
       strategy: "file-map-patch",
       requireCleanGitWorktree: true,
       verifyOriginalCommand: true
-    }
+    },
+    workflow: workflowMetadataFor(capsuleId)
   };
 
   await writeManifest(capsulePath, manifest);
   await writeReadme(capsulePath, manifest);
+  await initializeWorkflow(repoPath, manifest);
 
   if (options.installDependencies ?? true) {
     await runShellCommand("npm install --ignore-scripts", capsulePath);

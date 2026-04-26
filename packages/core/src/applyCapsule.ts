@@ -6,12 +6,30 @@ import { ensureDir, hashFile, pathExists, writeTextFile } from "./fileUtils.js";
 import { capsulePathFor, readManifest } from "./manifest.js";
 import { runShellCommand } from "./shell.js";
 import { verifyCapsule } from "./verifyCapsule.js";
+import { assertWorkflowCanApply, isStrictWorkflowManifest } from "./workflow.js";
 import type { ApplyCapsuleOptions, ApplyCapsuleResult } from "./types.js";
 
 export async function applyCapsule(options: ApplyCapsuleOptions): Promise<ApplyCapsuleResult> {
   const repoPath = path.resolve(options.repoPath);
   const capsulePath = capsulePathFor(repoPath, options.capsuleId);
   const manifest = await readManifest(capsulePath);
+  const applyGate = await assertWorkflowCanApply(repoPath, manifest);
+
+  if (!applyGate.ok) {
+    return {
+      status: "failed",
+      modifiedOriginalFiles: [],
+      message: applyGate.message
+    };
+  }
+
+  if (isStrictWorkflowManifest(manifest) && !options.workflowValidated) {
+    return {
+      status: "failed",
+      modifiedOriginalFiles: [],
+      message: "Strict deterministic workflow requires applying through bugcapsule_fix_step with action='apply_patch'."
+    };
+  }
 
   if (!options.allowDirty && manifest.apply.requireCleanGitWorktree) {
     const dirty = await scopedGitDirty(repoPath);

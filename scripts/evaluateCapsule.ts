@@ -5,6 +5,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { encodingForModel, getEncoding, getEncodingNameForModel } from "js-tiktoken";
 
+import { loadPricing } from "../packages/mcp/src/usage/pricing.js";
+
 type CliOptions = {
   repoPath: string;
   capsuleId: string;
@@ -172,7 +174,7 @@ const LOCKFILES = new Set([
 const MAX_FILE_BYTES = 1 * 1024 * 1024;
 
 async function main(): Promise<void> {
-  const options = parseArgs(process.argv.slice(2));
+  const options = await resolveCliOptions(parseArgs(process.argv.slice(2)));
   const repoPath = path.resolve(options.repoPath);
   const capsulePath = path.join(repoPath, ".bugcapsule", "capsules", options.capsuleId);
   const manifest = await readJson<CapsuleManifest>(path.join(capsulePath, "capsule.json"));
@@ -329,7 +331,7 @@ function parseArgs(argv: string[]): CliOptions {
   const model = values.get("model");
   const encoding = values.get("encoding");
 
-  if (!repoPath || !capsuleId || (!model && !encoding)) {
+  if (!repoPath || !capsuleId) {
     printUsageAndExit(1);
   }
 
@@ -353,12 +355,40 @@ function parseArgs(argv: string[]): CliOptions {
   };
 }
 
+async function resolveCliOptions(options: CliOptions): Promise<CliOptions> {
+  const needsTokenizerDefault = !options.model && !options.encoding;
+  const needsPricingDefaults = needsTokenizerDefault ||
+    options.inputPricePerMillion === undefined ||
+    options.outputPricePerMillion === undefined;
+
+  if (!needsPricingDefaults) {
+    return options;
+  }
+
+  const pricing = await loadPricing(path.resolve(options.repoPath));
+  const resolved: CliOptions = {
+    ...options,
+    ...(!options.model ? { model: pricing.model } : {}),
+    ...(needsTokenizerDefault && pricing.evaluation_encoding ? { encoding: pricing.evaluation_encoding } : {}),
+    ...(options.inputPricePerMillion === undefined ? { inputPricePerMillion: pricing.input_per_million } : {}),
+    ...(options.outputPricePerMillion === undefined ? { outputPricePerMillion: pricing.output_per_million } : {})
+  };
+
+  if (!resolved.model && !resolved.encoding) {
+    printUsageAndExit(1);
+  }
+
+  return resolved;
+}
+
 function printUsageAndExit(code: number): never {
   const usage = `Usage:
-  npm run eval:capsule -- --repo <repoPath> --capsule-id <id> --model <openai-model> --input-price-per-million <usd>
+  npm run eval:capsule -- --repo <repoPath> --capsule-id <id>
 
 Options:
+  --model <name>                       Override the configured pricing profile model.
   --encoding <name>                    Use a tokenizer encoding directly, for example o200k_base.
+  --input-price-per-million <usd>       Override configured input pricing.
   --output-price-per-million <usd>      Enables listed-cost totals for measured usage logs.
   --baseline-usage <path>               Optional exact provider/harness usage JSON for the no-BugCapsule run.
   --bugcapsule-usage <path>             Optional exact provider/harness usage JSON for the BugCapsule run.
@@ -366,6 +396,7 @@ Options:
   --include-lockfiles                   Include package-lock.json, pnpm-lock.yaml, yarn.lock, and bun.lockb.
 
 Notes:
+  Model, tokenizer encoding, and prices default to .bugcapsule/pricing.json, then BugCapsule's bundled pricing profile.
   The context comparison is exact for OpenAI-compatible tiktoken models/encodings.
   Exact fix cost without BugCapsule cannot be inferred; supply a measured baseline usage log.
 `;

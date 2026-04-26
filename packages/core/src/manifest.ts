@@ -23,8 +23,17 @@ export async function writeReadme(capsulePath: string, manifest: BugCapsuleManif
     .join("\n");
   const upstreamSection = renderUpstreamCandidates(manifest);
   const inputLineageSection = renderInputLineage(manifest);
+  const workflowSection = renderWorkflowSection(manifest);
 
-  await writeTextFile(path.join(capsulePath, "README.md"), `# BugCapsule: ${manifest.name}\n\n## Bug\n\n${manifest.originalRepro.failureSummary}\n\n## Original repro\n\n\`\`\`bash\n${manifest.originalRepro.command}\n\`\`\`\n\n## Capsule repro\n\n\`\`\`bash\nnpm install\n${manifest.capsule.runCommand}\n\`\`\`\n\n## Expected behavior\n\nThe repro command should pass after the bug is fixed.\n\n## Current behavior\n\nThe repro command currently fails with:\n\n\`\`\`text\n${manifest.originalRepro.failureSummary}\n\`\`\`\n\n${upstreamSection}${inputLineageSection}## Files copied from original repo\n\n| Capsule file | Original file | Signal |\n|---|---|---|\n${rows}\n\n## Symptom-patch warning\n\n${antiSymptomPatchingInstructions()}\n\n## Instructions for coding agents\n\n1. Run \`${manifest.capsule.runCommand}\`.\n2. Fix the failing behavior.\n3. Keep the fix minimal.\n4. Do not remove the repro.\n5. After the repro passes, call the MCP tool \`bugcapsule_apply_patch\` with \`repoPath\`, \`capsuleId: "${manifest.capsuleId}"\`, and \`verify: true\`.\n`);
+  await writeTextFile(path.join(capsulePath, "README.md"), `# BugCapsule: ${manifest.name}\n\n## Bug\n\n${manifest.originalRepro.failureSummary}\n\n## Original repro\n\n\`\`\`bash\n${manifest.originalRepro.command}\n\`\`\`\n\n## Capsule repro\n\n\`\`\`bash\nnpm install\n${manifest.capsule.runCommand}\n\`\`\`\n\n## Expected behavior\n\nThe repro command should pass after the bug is fixed.\n\n## Current behavior\n\nThe repro command currently fails with:\n\n\`\`\`text\n${manifest.originalRepro.failureSummary}\n\`\`\`\n\n${upstreamSection}${inputLineageSection}## Files copied from original repo\n\n| Capsule file | Original file | Signal |\n|---|---|---|\n${rows}\n\n${workflowSection}## Symptom-patch warning\n\n${antiSymptomPatchingInstructions()}\n\n## Instructions for coding agents\n\n1. Call the MCP tool \`bugcapsule_fix_step\` with \`action: "inspect"\`.\n2. Call \`bugcapsule_fix_step\` with \`action: "reproduce_initial"\` to record the failing capsule receipt.\n3. Fix the failing behavior in mapped editable capsule files only.\n4. Call \`bugcapsule_fix_step\` with \`action: "verify_capsule"\` until the capsule passes.\n5. Call \`bugcapsule_fix_step\` with \`action: "apply_patch"\` to apply the exact verified file set.\n`);
+}
+
+function renderWorkflowSection(manifest: BugCapsuleManifest): string {
+  if (!manifest.workflow?.strict) {
+    return "";
+  }
+
+  return `## Deterministic workflow\n\nThis capsule uses a strict BugCapsule workflow. Apply-back is gated by \`${manifest.workflow.workflowPath}\`, and the source repo will only be patched from the exact editable capsule file set that passed \`bugcapsule_fix_step\` verification.\n\n`;
 }
 
 function renderUpstreamCandidates(manifest: BugCapsuleManifest): string {

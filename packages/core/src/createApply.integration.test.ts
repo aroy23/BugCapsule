@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { applyCapsule } from "./applyCapsule.js";
 import { createCapsule } from "./createCapsule.js";
+import { runFixStep } from "./fixStep.js";
 import { writeInvoiceFixtureRepo } from "./testFixtures.js";
 
 const tempRoot = path.resolve(".tmp-tests/core");
@@ -37,6 +38,28 @@ describe("BugCapsule create/apply integration", () => {
     await expect(fs.access(path.join(repoPath, ".bugcapsule", "captures", created.capsuleId, "original.stderr.log"))).resolves.toBeUndefined();
     await expect(fs.access(path.join(repoPath, ".bugcapsule", "reports", created.capsuleId, "report.md"))).rejects.toThrow();
     await expect(fs.access(path.join(repoPath, ".bugcapsule", "reports", created.capsuleId, "report.json"))).rejects.toThrow();
+    expect(created.manifest.schemaVersion).toBe("0.2");
+    expect(created.manifest.workflow?.requiredNextAction).toBe("inspect");
+
+    await expect(runFixStep({
+      repoPath,
+      capsuleId: created.capsuleId,
+      action: "inspect"
+    })).resolves.toMatchObject({
+      status: "ok",
+      currentState: "inspected",
+      requiredNextAction: "reproduce_initial"
+    });
+
+    await expect(runFixStep({
+      repoPath,
+      capsuleId: created.capsuleId,
+      action: "reproduce_initial"
+    })).resolves.toMatchObject({
+      status: "ok",
+      currentState: "initial_failure_confirmed",
+      requiredNextAction: "verify_capsule"
+    });
 
     const capsuleCustomerAddressPath = path.join(
       created.capsulePath,
@@ -48,15 +71,37 @@ describe("BugCapsule create/apply integration", () => {
       "  if (!address) {\n    return \"\";\n  }\n\n  return `${address.line1}, ${address.city}, ${address.country}`;"
     ));
 
-    const applied = await applyCapsule({
+    await expect(applyCapsule({
       repoPath,
       capsuleId: created.capsuleId,
       verify: true,
       allowDirty: true
+    })).resolves.toMatchObject({
+      status: "failed",
+      message: "Strict BugCapsule workflow requires state 'capsule_passed' before apply. Current state is 'initial_failure_confirmed'. Required next action: verify_capsule."
     });
 
-    expect(applied.status).toBe("applied_verified");
-    expect(applied.modifiedOriginalFiles).toEqual(["src/billing/customerAddress.ts"]);
+    const verified = await runFixStep({
+      repoPath,
+      capsuleId: created.capsuleId,
+      action: "verify_capsule"
+    });
+
+    expect(verified).toMatchObject({
+      status: "ok",
+      currentState: "capsule_passed",
+      requiredNextAction: "apply_patch"
+    });
+
+    const applied = await runFixStep({
+      repoPath,
+      capsuleId: created.capsuleId,
+      action: "apply_patch"
+    });
+
+    expect(applied.status).toBe("ok");
+    expect(applied.applyResult?.status).toBe("applied_verified");
+    expect(applied.applyResult?.modifiedOriginalFiles).toEqual(["src/billing/customerAddress.ts"]);
     expect(await fs.readFile(path.join(repoPath, "src/billing/customerAddress.ts"), "utf8")).toContain("if (!address)");
   });
 });

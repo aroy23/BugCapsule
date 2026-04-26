@@ -55,8 +55,78 @@ export type InputLineage = {
   requestBoundarySource?: string;
 };
 
-export type BugCapsuleManifest = {
+export type WorkflowState =
+  | "created"
+  | "inspected"
+  | "initial_failure_confirmed"
+  | "awaiting_fix"
+  | "capsule_passed"
+  | "applied";
+
+export type WorkflowAction = "next" | "inspect" | "reproduce_initial" | "verify_capsule" | "apply_patch";
+export type WorkflowNextAction = Exclude<WorkflowAction, "next"> | "done";
+
+export type BugCapsuleWorkflowMetadata = {
+  id: string;
+  strict: boolean;
+  state: WorkflowState;
+  workflowPath: string;
+  requiredNextAction: WorkflowNextAction;
+};
+
+export type CapsuleIntegrityStatus = {
+  status: "passed" | "failed";
+  checkedFiles: number;
+  modifiedLockedFiles: string[];
+  missingLockedFiles: string[];
+};
+
+export type WorkflowCommandReceipt = {
+  id: string;
+  action: Extract<WorkflowAction, "reproduce_initial" | "verify_capsule" | "apply_patch">;
+  timestamp: string;
+  command: string;
+  cwd: string;
+  exitCode: number;
+  durationMs: number;
+  stdoutPath: string;
+  stderrPath: string;
+  stdoutHash: string;
+  stderrHash: string;
+  editableFileSetHash: string;
+  lockedFileIntegrity: CapsuleIntegrityStatus;
+  result: "passed" | "failed" | "error";
+};
+
+export type WorkflowEventReceipt = {
+  id: string;
+  action: Extract<WorkflowAction, "inspect">;
+  timestamp: string;
+  editableFileSetHash: string;
+  lockedFileIntegrity: CapsuleIntegrityStatus;
+  result: "passed" | "failed";
+};
+
+export type WorkflowReceipt = WorkflowCommandReceipt | WorkflowEventReceipt;
+
+export type BugCapsuleWorkflow = {
   schemaVersion: "0.1";
+  workflowId: string;
+  capsuleId: string;
+  repoPath: string;
+  capsulePath: string;
+  strict: boolean;
+  state: WorkflowState;
+  requiredNextAction: WorkflowNextAction;
+  createdAt: string;
+  updatedAt: string;
+  receipts: WorkflowReceipt[];
+  passingReceiptId?: string;
+  passingEditableFileSetHash?: string;
+};
+
+export type BugCapsuleManifest = {
+  schemaVersion: "0.1" | "0.2";
   capsuleId: string;
   name: string;
   createdAt: string;
@@ -99,6 +169,7 @@ export type BugCapsuleManifest = {
     requireCleanGitWorktree: boolean;
     verifyOriginalCommand: boolean;
   };
+  workflow?: BugCapsuleWorkflowMetadata;
 };
 
 export type CreateCapsuleOptions = {
@@ -264,6 +335,7 @@ export type ApplyCapsuleOptions = {
   dryRun?: boolean;
   verify?: boolean;
   allowDirty?: boolean;
+  workflowValidated?: boolean;
 };
 
 export type ApplyCapsuleResult = {
@@ -289,6 +361,33 @@ export type VerifyCapsuleResult = {
     stdout?: string;
     stderr?: string;
   }>;
+};
+
+export type FixStepOptions = {
+  repoPath: string;
+  capsuleId: string;
+  action: WorkflowAction;
+};
+
+export type FixStepResult = {
+  status: "ok" | "rejected" | "failed";
+  capsuleId: string;
+  workflow?: BugCapsuleWorkflow;
+  currentState: WorkflowState;
+  requiredNextAction: WorkflowNextAction;
+  message: string;
+  manifest?: BugCapsuleManifest;
+  readme?: string;
+  receipt?: WorkflowReceipt;
+  applyResult?: ApplyCapsuleResult;
+  nextToolCall?: {
+    tool: "bugcapsule_fix_step";
+    arguments: {
+      repoPath: string;
+      capsuleId: string;
+      action: WorkflowAction;
+    };
+  };
 };
 
 export type InspectCapsuleOptions = {

@@ -173,7 +173,7 @@ function buildWorkflow(
         {
           step: 3,
           action: "apply_back",
-          detail: "Call bugcapsule_apply_patch with verify=true after the capsule passes."
+          detail: "Call bugcapsule_fix_step with action='apply_patch' after the capsule passes."
         }
       ];
     }

@@ -14,6 +14,7 @@ import {
   inspectCapsule,
   listCapsules,
   runCapsule,
+  runFixStep,
   suggestRepro,
   verifyCapsule,
   type BugCapsuleManifest,
@@ -21,6 +22,7 @@ import {
 } from "@bugcapsule/core";
 
 import { SessionTracker } from "./usage/sessionTracker.js";
+import { loadPricing } from "./usage/pricing.js";
 import { registerTrackedTool } from "./usage/wrapTool.js";
 
 const server = new McpServer({
@@ -81,7 +83,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
       description: [
         "Call this when the user reports a visual or runtime bug with broad context, such as 'this button does not work', and can provide the local page URL.",
         "It probes same-origin interactions from the page, captures the server-side stack, generates a hidden source repro under .bugcapsule/repros, then creates an executable capsule.",
-        "After this tool succeeds, open the capsulePath, fix only the capsule, rerun its runCommand, then call bugcapsule_apply_patch with verify=true."
+        "After this tool succeeds, follow deterministicWorkflow.nextToolCall and use bugcapsule_fix_step for inspect, reproduction, verification, and apply-back."
       ].join(" "),
       inputSchema: {
         repoPath: z.string(),
@@ -137,12 +139,13 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
           suspectedUpstreamCauses: result.manifest.suspectedUpstreamCauses ?? [],
           generatedMocks: result.manifest.mocks.map((mock) => mock.moduleName)
         },
+        deterministicWorkflow: workflowSummary(args.repoPath, result.manifest),
         agentWorkflow: buildAgentWorkflow(result),
         applyPatchToolCall: {
-          tool: "bugcapsule_apply_patch",
-          arguments: applyPatchArguments(args, result.capsuleId)
+          tool: "bugcapsule_fix_step",
+          arguments: fixStepArguments(args.repoPath, result.capsuleId, "apply_patch", args)
         },
-        nextAgentInstruction: `Open ${result.capsulePath}, read README.md and capsule.json, run ${result.manifest.capsule.runCommand}, fix the failing behavior only inside the capsule, rerun ${result.manifest.capsule.runCommand}, then call bugcapsule_apply_patch with verify=true.`
+        nextAgentInstruction: `Call bugcapsule_fix_step with repoPath='${args.repoPath}', capsuleId='${result.capsuleId}', action='inspect'. Follow the returned nextToolCall until action='apply_patch' succeeds.`
       });
     }
   );
@@ -156,7 +159,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
       description: [
         "Call this first whenever the user asks BugCapsule to isolate, shrink, or fix a bug and provides a failing command. If the user does not know a failing command but has a local URL, call bugcapsule_create_from_runtime instead.",
         "This tool runs the failing command, creates a minimized executable capsule, and returns the exact next workflow for the agent.",
-        "After this tool succeeds, do not ask the user for more BugCapsule steps: open the capsulePath, fix only the capsule, rerun its runCommand, then call bugcapsule_apply_patch with verify=true."
+        "After this tool succeeds, follow deterministicWorkflow.nextToolCall and use bugcapsule_fix_step for inspect, reproduction, verification, and apply-back."
       ].join(" "),
       inputSchema: {
         repoPath: z.string(),
@@ -202,12 +205,13 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
           suspectedUpstreamCauses: result.manifest.suspectedUpstreamCauses ?? [],
           generatedMocks: result.manifest.mocks.map((mock) => mock.moduleName)
         },
+        deterministicWorkflow: workflowSummary(args.repoPath, result.manifest),
         agentWorkflow: buildAgentWorkflow(result),
         applyPatchToolCall: {
-          tool: "bugcapsule_apply_patch",
-          arguments: applyPatchArguments(args, result.capsuleId)
+          tool: "bugcapsule_fix_step",
+          arguments: fixStepArguments(args.repoPath, result.capsuleId, "apply_patch", args)
         },
-        nextAgentInstruction: `Open ${result.capsulePath}, read README.md and capsule.json, run ${result.manifest.capsule.runCommand}, fix the failing behavior only inside the capsule, rerun ${result.manifest.capsule.runCommand}, then call bugcapsule_apply_patch with verify=true.`
+        nextAgentInstruction: `Call bugcapsule_fix_step with repoPath='${args.repoPath}', capsuleId='${result.capsuleId}', action='inspect'. Follow the returned nextToolCall until action='apply_patch' succeeds.`
       });
     }
   );
@@ -273,10 +277,75 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
   registerTrackedTool(
     mcp,
     tracker,
+    "bugcapsule_fix_step",
+    {
+      title: "Run Deterministic BugCapsule Fix Step",
+      description: [
+        "Use this for strict BugCapsule capsules. It enforces the canonical workflow: inspect, reproduce_initial, verify_capsule, apply_patch.",
+        "If called out of order, it returns the required next action and does not mutate source files.",
+        "Apply-back succeeds only when the current editable capsule file set exactly matches a passing verify_capsule receipt."
+      ].join(" "),
+      inputSchema: {
+        repoPath: z.string(),
+        capsuleId: z.string(),
+        action: z.enum(["next", "inspect", "reproduce_initial", "verify_capsule", "apply_patch"]),
+        generateEvaluation: z.boolean().optional(),
+        evaluationModel: z.string().optional(),
+        evaluationEncoding: z.string().optional(),
+        inputPricePerMillion: z.number().nonnegative().optional(),
+        outputPricePerMillion: z.number().nonnegative().optional()
+      }
+    },
+    async (args) => {
+      const result = await runFixStep({
+        repoPath: args.repoPath,
+        capsuleId: args.capsuleId,
+        action: args.action
+      });
+
+      if (args.action !== "apply_patch" || result.status !== "ok" || !result.applyResult?.status.startsWith("applied_")) {
+        return jsonResult(result);
+      }
+
+      const evaluationConfig = await resolveEvaluationConfig(args);
+
+      if (evaluationConfig.status === "disabled") {
+        return jsonResult(result);
+      }
+
+      if (evaluationConfig.status === "invalid") {
+        return jsonResult({
+          ...result,
+          evaluation: {
+            status: "failed",
+            message: evaluationConfig.message
+          }
+        });
+      }
+
+      const evaluation = await runEvaluation({
+        repoPath: args.repoPath,
+        capsuleId: args.capsuleId,
+        evaluationModel: evaluationConfig.evaluationModel,
+        ...(evaluationConfig.evaluationEncoding ? { evaluationEncoding: evaluationConfig.evaluationEncoding } : {}),
+        inputPricePerMillion: evaluationConfig.inputPricePerMillion,
+        outputPricePerMillion: evaluationConfig.outputPricePerMillion
+      });
+
+      return jsonResult({
+        ...result,
+        evaluation
+      });
+    }
+  );
+
+  registerTrackedTool(
+    mcp,
+    tracker,
     "bugcapsule_apply_patch",
     {
       title: "Apply BugCapsule Patch",
-      description: "Apply changed capsule files back to their original source paths. Call this after the capsule repro passes; default verify=true reruns both capsule and original repro.",
+      description: "Apply changed capsule files back to their original source paths. Legacy-compatible tool; strict workflow capsules must apply through bugcapsule_fix_step with action='apply_patch'.",
       inputSchema: {
         repoPath: z.string(),
         capsuleId: z.string(),
@@ -299,7 +368,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         allowDirty: args.allowDirty
       });
 
-      const evaluationConfig = resolveEvaluationConfig(args);
+      const evaluationConfig = await resolveEvaluationConfig(args);
 
       if (evaluationConfig.status === "disabled" || args.dryRun || !result.status.startsWith("applied_")) {
         return jsonResult(result);
@@ -396,7 +465,7 @@ function registerPrompts(mcp: McpServer): void {
           role: "user",
           content: {
             type: "text",
-            text: `You are fixing a minimized BugCapsule reproduction.\n\n${ANTI_SYMPTOM_PATCHING_INSTRUCTIONS}\n\nInstructions:\n1. Open the capsule directory.\n2. Read README.md and capsule.json.\n3. Run the capsule repro command.\n4. Fix the failing behavior inside the capsule.\n5. Do not broaden the fix unnecessarily.\n6. Rerun the capsule repro command.\n7. Once passing, call bugcapsule_apply_patch with verify=true.`
+            text: `You are fixing a minimized BugCapsule reproduction.\n\n${ANTI_SYMPTOM_PATCHING_INSTRUCTIONS}\n\nInstructions:\n1. Call bugcapsule_fix_step with action="inspect".\n2. Call bugcapsule_fix_step with action="reproduce_initial".\n3. Fix the failing behavior inside mapped editable capsule files only.\n4. Call bugcapsule_fix_step with action="verify_capsule" until it passes.\n5. Call bugcapsule_fix_step with action="apply_patch" to apply the exact verified file set.`
           }
         }
       ]
@@ -420,7 +489,7 @@ function registerPrompts(mcp: McpServer): void {
           role: "user",
           content: {
             type: "text",
-            text: `Use BugCapsule to fix this bug.\n\nRepo path:\n${args.repoPath}\n\nFailing command:\n${args.command}\n\n${ANTI_SYMPTOM_PATCHING_INSTRUCTIONS}\n\nCall bugcapsule_create_from_command first. Follow the agentWorkflow returned by the tool. Fix only files inside the generated capsule until the capsule passes. Then call bugcapsule_apply_patch with verify=true and summarize the original files changed.`
+            text: `Use BugCapsule to fix this bug.\n\nRepo path:\n${args.repoPath}\n\nFailing command:\n${args.command}\n\n${ANTI_SYMPTOM_PATCHING_INSTRUCTIONS}\n\nCall bugcapsule_create_from_command first. Follow deterministicWorkflow.nextToolCall from the tool result. Fix only mapped editable capsule files, then apply through bugcapsule_fix_step with action="apply_patch" and summarize the original files changed.`
           }
         }
       ]
@@ -445,7 +514,7 @@ function registerPrompts(mcp: McpServer): void {
           role: "user",
           content: {
             type: "text",
-            text: `Use BugCapsule to fix this runtime bug.\n\nRepo path:\n${args.repoPath}\n\nURL:\n${args.url}\n\nSymptom:\n${args.bugDescription}\n\n${ANTI_SYMPTOM_PATCHING_INSTRUCTIONS}\n\nCall bugcapsule_create_from_runtime first. Follow the agentWorkflow returned by the tool. Fix only files inside the generated capsule until the capsule passes. Then call bugcapsule_apply_patch with verify=true and summarize the original files changed.`
+            text: `Use BugCapsule to fix this runtime bug.\n\nRepo path:\n${args.repoPath}\n\nURL:\n${args.url}\n\nSymptom:\n${args.bugDescription}\n\n${ANTI_SYMPTOM_PATCHING_INSTRUCTIONS}\n\nCall bugcapsule_create_from_runtime first. Follow deterministicWorkflow.nextToolCall from the tool result. Fix only mapped editable capsule files, then apply through bugcapsule_fix_step with action="apply_patch" and summarize the original files changed.`
           }
         }
       ]
@@ -516,23 +585,45 @@ function buildAgentWorkflow(result: CreateCapsuleResult): Array<{
   return buildAgentWorkflowFromManifest(result.manifest.originalRepo.rootPath, result.manifest);
 }
 
-function applyPatchArguments(args: {
-  repoPath: string;
-  generateEvaluation?: boolean;
-  evaluationModel?: string;
-  evaluationEncoding?: string;
-  inputPricePerMillion?: number;
-  outputPricePerMillion?: number;
-}, capsuleId: string): Record<string, unknown> {
+function fixStepArguments(
+  repoPath: string,
+  capsuleId: string,
+  action: "next" | "inspect" | "reproduce_initial" | "verify_capsule" | "apply_patch",
+  evaluationArgs?: {
+    generateEvaluation?: boolean;
+    evaluationModel?: string;
+    evaluationEncoding?: string;
+    inputPricePerMillion?: number;
+    outputPricePerMillion?: number;
+  }
+): Record<string, unknown> {
   return {
-    repoPath: args.repoPath,
+    repoPath,
     capsuleId,
-    verify: true,
-    ...(args.generateEvaluation !== undefined ? { generateEvaluation: args.generateEvaluation } : {}),
-    ...(args.evaluationModel ? { evaluationModel: args.evaluationModel } : {}),
-    ...(args.evaluationEncoding ? { evaluationEncoding: args.evaluationEncoding } : {}),
-    ...(args.inputPricePerMillion !== undefined ? { inputPricePerMillion: args.inputPricePerMillion } : {}),
-    ...(args.outputPricePerMillion !== undefined ? { outputPricePerMillion: args.outputPricePerMillion } : {})
+    action,
+    ...(evaluationArgs?.generateEvaluation !== undefined ? { generateEvaluation: evaluationArgs.generateEvaluation } : {}),
+    ...(evaluationArgs?.evaluationModel ? { evaluationModel: evaluationArgs.evaluationModel } : {}),
+    ...(evaluationArgs?.evaluationEncoding ? { evaluationEncoding: evaluationArgs.evaluationEncoding } : {}),
+    ...(evaluationArgs?.inputPricePerMillion !== undefined ? { inputPricePerMillion: evaluationArgs.inputPricePerMillion } : {}),
+    ...(evaluationArgs?.outputPricePerMillion !== undefined ? { outputPricePerMillion: evaluationArgs.outputPricePerMillion } : {})
+  };
+}
+
+function workflowSummary(repoPath: string, manifest: BugCapsuleManifest): Record<string, unknown> | undefined {
+  if (!manifest.workflow) {
+    return undefined;
+  }
+
+  return {
+    workflowId: manifest.workflow.id,
+    strict: manifest.workflow.strict,
+    currentState: manifest.workflow.state,
+    workflowPath: path.join(repoPath, manifest.workflow.workflowPath),
+    requiredNextAction: manifest.workflow.requiredNextAction,
+    nextToolCall: {
+      tool: "bugcapsule_fix_step",
+      arguments: fixStepArguments(repoPath, manifest.capsuleId, manifest.workflow.requiredNextAction === "done" ? "next" : manifest.workflow.requiredNextAction)
+    }
   };
 }
 
@@ -547,13 +638,14 @@ type EvaluationConfig =
     outputPricePerMillion: number;
   };
 
-function resolveEvaluationConfig(args: {
+async function resolveEvaluationConfig(args: {
+  repoPath: string;
   generateEvaluation?: boolean;
   evaluationModel?: string;
   evaluationEncoding?: string;
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
-}): EvaluationConfig {
+}): Promise<EvaluationConfig> {
   const hasAnyEvaluationInput = args.generateEvaluation !== undefined ||
     Boolean(args.evaluationModel || args.evaluationEncoding) ||
     args.inputPricePerMillion !== undefined ||
@@ -563,14 +655,30 @@ function resolveEvaluationConfig(args: {
     return { status: "disabled" };
   }
 
-  if (!args.evaluationModel) {
+  let pricing;
+  try {
+    pricing = await loadPricing(args.repoPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      status: "invalid",
+      message: `Evaluation was requested, but pricing configuration is invalid: ${message}`
+    };
+  }
+
+  const evaluationModel = args.evaluationModel ?? pricing.model;
+  const inputPricePerMillion = args.inputPricePerMillion ?? pricing.input_per_million;
+  const outputPricePerMillion = args.outputPricePerMillion ?? pricing.output_per_million;
+  const evaluationEncoding = args.evaluationEncoding ?? (!args.evaluationModel ? pricing.evaluation_encoding : undefined);
+
+  if (!evaluationModel) {
     return {
       status: "invalid",
       message: "Evaluation was requested, but evaluationModel is missing."
     };
   }
 
-  if (args.inputPricePerMillion === undefined || args.outputPricePerMillion === undefined) {
+  if (inputPricePerMillion === undefined || outputPricePerMillion === undefined) {
     return {
       status: "invalid",
       message: "Evaluation was requested, but both inputPricePerMillion and outputPricePerMillion are required."
@@ -579,10 +687,10 @@ function resolveEvaluationConfig(args: {
 
   return {
     status: "enabled",
-    evaluationModel: args.evaluationModel,
-    ...(args.evaluationEncoding ? { evaluationEncoding: args.evaluationEncoding } : {}),
-    inputPricePerMillion: args.inputPricePerMillion,
-    outputPricePerMillion: args.outputPricePerMillion
+    evaluationModel,
+    ...(evaluationEncoding ? { evaluationEncoding } : {}),
+    inputPricePerMillion,
+    outputPricePerMillion
   };
 }
 
@@ -594,36 +702,31 @@ function buildAgentWorkflowFromManifest(repoPath: string, manifest: BugCapsuleMa
   return [
     {
       step: 1,
-      action: "open_capsule",
-      detail: `Work in the generated capsule only: ${manifest.capsule.path}`
+      action: "inspect",
+      detail: `Call bugcapsule_fix_step with repoPath='${repoPath}', capsuleId='${manifest.capsuleId}', action='inspect'.`
     },
     {
       step: 2,
-      action: "read_context",
-      detail: "Read README.md and capsule.json to understand the failure, file map, and editable files."
+      action: "reproduce_initial",
+      detail: "Call bugcapsule_fix_step with action='reproduce_initial' to record the initial failing capsule receipt."
     },
     {
       step: 3,
-      action: "reproduce",
-      detail: `Run '${manifest.capsule.runCommand}' inside the capsule and confirm the failure: ${manifest.originalRepro.failureSummary}`
-    },
-    {
-      step: 4,
       action: "fix_capsule",
       detail: `Edit only mapped editable capsule files: ${editableFiles(manifest).join(", ") || "none detected"}`
     },
     {
-      step: 5,
+      step: 4,
       action: "verify_capsule",
-      detail: `Rerun '${manifest.capsule.runCommand}' inside the capsule until it passes.`
+      detail: "Call bugcapsule_fix_step with action='verify_capsule'. Repeat edit and verify until the capsule passes."
+    },
+    {
+      step: 5,
+      action: "apply_back",
+      detail: "Call bugcapsule_fix_step with action='apply_patch'. This applies only the exact editable file set that passed verification."
     },
     {
       step: 6,
-      action: "apply_back",
-      detail: `Call bugcapsule_apply_patch with repoPath='${repoPath}', capsuleId='${manifest.capsuleId}', verify=true.`
-    },
-    {
-      step: 7,
       action: "summarize",
       detail: "Tell the user which original files changed and which verification checks passed."
     }

@@ -1,8 +1,16 @@
 export type Pricing = {
+  profile?: string;
+  provider?: string;
   model: string;
+  displayName?: string;
   currency: string;
   input_per_million: number;
+  cached_input_per_million?: number;
   output_per_million: number;
+  evaluation_encoding?: string;
+  source?: string;
+  verifiedAt?: string;
+  notes?: string;
 };
 
 export type RecordedCall = {

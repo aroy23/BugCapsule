@@ -10,10 +10,11 @@
   },
   "files": [
     "dist",
-    "pricing.json"
+    "pricing.json",
+    "pricing-catalog.json"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('pricing.json','dist/pricing.json')\"",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs'); for (const file of ['pricing.json','pricing-catalog.json']) fs.copyFileSync(file, 'dist/'+file)\"",
     "test": "vitest run"
   },
   "dependencies": {

@@ -1,6 +1,8 @@
 {
-  "model": "claude-sonnet",
+  "profile": "anthropic:claude-sonnet-4.6",
+  "model": "claude-sonnet-4.6",
   "currency": "USD",
   "input_per_million": 3,
-  "output_per_million": 15
+  "output_per_million": 15,
+  "evaluation_encoding": "o200k_base"
 }

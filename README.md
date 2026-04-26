@@ -119,8 +119,10 @@ Expected MCP flow:
 2. Probe same-origin page interactions from the URL.
 3. Capture the server-side stack and generated runtime repro.
 4. Create a minimized capsule.
-5. Fix only the capsule.
-6. Call `bugcapsule_apply_patch` with `verify: true`.
+5. Follow `deterministicWorkflow.nextToolCall`.
+6. Fix only mapped editable capsule files.
+7. Call `bugcapsule_fix_step` with `action: "verify_capsule"` until the capsule passes.
+8. Call `bugcapsule_fix_step` with `action: "apply_patch"`.
 
 This path does not require you to provide an exact error-producing command.
 
@@ -135,8 +137,10 @@ command: npm test -- checkout-missing-shipping-address
 Expected MCP flow:
 
 1. Call `bugcapsule_create_from_command`.
-2. Fix the generated capsule until its repro passes.
-3. Call `bugcapsule_apply_patch` with `verify: true`.
+2. Follow `deterministicWorkflow.nextToolCall`.
+3. Fix only mapped editable capsule files.
+4. Call `bugcapsule_fix_step` with `action: "verify_capsule"` until the capsule passes.
+5. Call `bugcapsule_fix_step` with `action: "apply_patch"`.
 
 ### If you only have a description
 
@@ -163,26 +167,40 @@ Description-only ambiguity handling exists, but it cannot always create a capsul
 - `bugcapsule_inspect`: read capsule manifest and README.
 - `bugcapsule_run`: run a capsule repro through MCP.
 - `bugcapsule_verify`: rerun capsule and original verification checks.
-- `bugcapsule_apply_patch`: apply changed capsule files back to the original repo.
+- `bugcapsule_fix_step`: deterministic strict workflow gate for inspect, initial reproduction, capsule verification, and apply-back.
+- `bugcapsule_apply_patch`: legacy-compatible apply tool. Strict workflow capsules must apply through `bugcapsule_fix_step`.
 
 ## Evaluation Prompt Add-On
 
-BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html` after `bugcapsule_apply_patch`. Evaluation is opt-in and requires complete pricing/model info. Add this to your BugCapsule prompt when you want the HTML:
+BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html` after deterministic apply-back through `bugcapsule_fix_step`. Evaluation is opt-in. Configure the model price once in `.bugcapsule/pricing.json`, then ask BugCapsule to generate evaluation.
 
-```text
-When applying the patch, generate evaluation with:
-evaluationModel: claude-opus-4-7
-evaluationEncoding: o200k_base
-inputPricePerMillion: 5.00
-outputPricePerMillion: 25.00
+```json
+{
+  "profile": "windsurf:swe-1.6-fast"
+}
 ```
 
-Modify `evaluationModel`, `inputPricePerMillion`, and `outputPricePerMillion` for the model and pricing you want to present. Modify `evaluationEncoding` when you need a different local tokenizer. Supported `js-tiktoken` encodings in this repo include:
+Profiles live in `packages/mcp/pricing-catalog.json`. Current bundled profile examples include:
 
-- `o200k_base`
-- `cl100k_base`
-- `p50k_base`
-- `r50k_base`
-- `gpt2`
+- `windsurf:swe-1.6-fast` (`$0.30/M` input, `$0.03/M` cached input, `$1.50/M` output; source: user-provided Windsurf model selector screenshot)
+- `anthropic:claude-sonnet-4.6`
+- `anthropic:claude-opus-4.7`
+- `openai:gpt-5.4`
+- `openai:gpt-5.4-mini`
+- `openai:gpt-5.3-codex`
+- `google:gemini-2.5-pro`
+- `google:gemini-2.5-flash`
+- `google:gemini-3-flash-preview`
 
-For Claude models, `evaluationEncoding` is a deterministic local proxy, not exact Claude tokenization.
+Manual overrides still work:
+
+```json
+{
+  "profile": "windsurf:swe-1.6-fast",
+  "input_per_million": 0.3,
+  "output_per_million": 1.5,
+  "evaluation_encoding": "o200k_base"
+}
+```
+
+Use `generateEvaluation: true` on `bugcapsule_apply_patch` or the final `bugcapsule_fix_step` apply action. For non-OpenAI models, `evaluation_encoding` is a deterministic local tokenizer proxy, not provider-exact tokenization. Supported `js-tiktoken` encodings include `o200k_base`, `cl100k_base`, `p50k_base`, `r50k_base`, and `gpt2`.

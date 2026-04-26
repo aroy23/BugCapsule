@@ -8,6 +8,14 @@ export { defineConfig } from "./config.js";
 export { initBugCapsule } from "./initProject.js";
 export { suggestRepro } from "./suggestRepro.js";
 export { createCapsuleFromRuntime, probeRuntime } from "./runtimeDiscovery.js";
+export { runFixStep } from "./fixStep.js";
+export {
+  assertWorkflowCanApply,
+  hashEditableFileSet,
+  readWorkflow,
+  validateCapsuleIntegrity,
+  writeWorkflow
+} from "./workflow.js";
 
 export type {
   AdditionalCapsuleFile,
@@ -15,8 +23,11 @@ export type {
   ApplyCapsuleResult,
   BugCapsuleConfig,
   BugCapsuleManifest,
+  BugCapsuleWorkflow,
+  BugCapsuleWorkflowMetadata,
   CapsuleFileMapping,
   CapsuleFixture,
+  CapsuleIntegrityStatus,
   CapsuleMock,
   CapsuleRunScript,
   CapturedFailure,
@@ -24,6 +35,8 @@ export type {
   CreateCapsuleFromRuntimeOptions,
   CreateCapsuleFromRuntimeResult,
   CreateCapsuleResult,
+  FixStepOptions,
+  FixStepResult,
   InspectCapsuleOptions,
   InputLineage,
   ListCapsulesOptions,
@@ -42,6 +55,12 @@ export type {
   SuspectedUpstreamCause,
   SuggestReproOptions,
   SuggestReproResult,
+  WorkflowAction,
+  WorkflowCommandReceipt,
+  WorkflowEventReceipt,
+  WorkflowNextAction,
+  WorkflowReceipt,
+  WorkflowState,
   VerifyCapsuleOptions,
   VerifyCapsuleResult
 } from "./types.js";

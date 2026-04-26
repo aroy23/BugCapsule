@@ -4,6 +4,7 @@ import { estimateTokens, estimateTokensForJson } from "./tokenizer.js";
 import type { SessionTracker } from "./sessionTracker.js";
 
 const APPLY_PATCH_TOOL = "bugcapsule_apply_patch";
+const FIX_STEP_TOOL = "bugcapsule_fix_step";
 
 type AnyToolConfig = {
   title?: string;
@@ -63,7 +64,7 @@ export function registerTrackedTool(
             ...(threw ? { error: true } : {})
           })
           .then(async () => {
-            if (!threw && name === APPLY_PATCH_TOOL) {
+            if (!threw && (name === APPLY_PATCH_TOOL || (name === FIX_STEP_TOOL && args?.action === "apply_patch"))) {
               await tracker.finalizeSession(repoPath, "apply_patch");
             }
           })

@@ -1,11 +1,27 @@
 import { readManifest, capsulePathFor } from "./manifest.js";
 import { runShellCommand } from "./shell.js";
+import { integrityFailureMessage, validateCapsuleIntegrity } from "./workflow.js";
 import type { VerifyCapsuleOptions, VerifyCapsuleResult } from "./types.js";
 
 export async function verifyCapsule(options: VerifyCapsuleOptions): Promise<VerifyCapsuleResult> {
   const capsulePath = capsulePathFor(options.repoPath, options.capsuleId);
   const manifest = await readManifest(capsulePath);
   const checks: VerifyCapsuleResult["checks"] = [];
+  const integrity = await validateCapsuleIntegrity(manifest);
+
+  checks.push({
+    name: "capsule integrity",
+    status: integrity.status,
+    ...(integrity.status === "failed" ? { stderr: integrityFailureMessage(integrity) } : {})
+  });
+
+  if (integrity.status !== "passed") {
+    return {
+      status: "failed",
+      checks
+    };
+  }
+
   const capsule = await runShellCommand(manifest.capsule.runCommand, capsulePath);
 
   checks.push({
