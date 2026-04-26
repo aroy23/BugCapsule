@@ -11,7 +11,7 @@ const DEFAULT_PRICING: Pricing = {
   output_per_million: 15
 };
 
-type PricingConfig = Partial<Pricing> & {
+export type PricingConfig = Partial<Pricing> & {
   profile?: string;
 };
 

@@ -12,6 +12,7 @@
     "build": "npm run build --workspace @bugcapsule/core && npm run build --workspace @bugcapsule/mcp",
     "clean": "rm -rf packages/*/dist",
     "eval:capsule": "tsx scripts/evaluateCapsule.ts",
+    "pricing": "tsx scripts/configurePricing.ts",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"

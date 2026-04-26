@@ -172,7 +172,21 @@ Description-only ambiguity handling exists, but it cannot always create a capsul
 
 ## Evaluation Prompt Add-On
 
-BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html` after deterministic apply-back through `bugcapsule_fix_step`. Evaluation is opt-in. Configure the model price once in `.bugcapsule/pricing.json`, then ask BugCapsule to generate evaluation.
+BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html` after deterministic apply-back through `bugcapsule_fix_step`. Evaluation is opt-in. Configure the model price once from the target repo root, then ask BugCapsule to generate evaluation.
+
+If `.bugcapsule` does not exist yet, the CLI creates it and writes `.bugcapsule/pricing.json` before any capsule is created:
+
+```bash
+npm run pricing -- --repo /path/to/repo --profile windsurf:swe-1.6-fast
+```
+
+List available profiles:
+
+```bash
+npm run pricing -- --list
+```
+
+The resulting config is:
 
 ```json
 {
