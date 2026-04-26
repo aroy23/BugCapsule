@@ -1809,7 +1809,7 @@ function renderHtml(report: EvaluationReport): string {
     <footer class="footer">
       <div class="footer-info">
         <span>Schema v${escapeHtml(report.schemaVersion)} · generated ${escapeHtml(generatedFormatted)}</span>
-        <span>Tokenizer: ${escapeHtml(report.tokenizer.kind)} · ${escapeHtml(report.tokenizer.encoding)}${report.tokenizer.exactForConfiguredModel ? " (exact for configured model)" : ""}</span>
+        <span>Tokenizer: ${escapeHtml(report.tokenizer.encoding)}${report.tokenizer.exactForConfiguredModel ? " (exact for configured model)" : ""}</span>
       </div>
       <div class="footer-mark">bugcapsule</div>
     </footer>
