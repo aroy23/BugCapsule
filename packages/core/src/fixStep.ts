@@ -66,7 +66,7 @@ export async function runFixStep(options: FixStepOptions): Promise<FixStepResult
     case "verify_capsule":
       return verifyCapsuleStep(repoPath, manifest, workflow);
     case "apply_patch":
-      return applyPatchStep(repoPath, manifest, workflow);
+      return applyPatchStep(repoPath, manifest, workflow, options);
   }
 }
 
@@ -174,7 +174,8 @@ async function verifyCapsuleStep(
 async function applyPatchStep(
   repoPath: string,
   manifest: BugCapsuleManifest,
-  workflow: BugCapsuleWorkflow
+  workflow: BugCapsuleWorkflow,
+  options: FixStepOptions
 ): Promise<FixStepResult> {
   const gate = await assertWorkflowCanApply(repoPath, manifest);
 
@@ -196,7 +197,8 @@ async function applyPatchStep(
     repoPath,
     capsuleId: manifest.capsuleId,
     verify: true,
-    workflowValidated: true
+    workflowValidated: true,
+    ...(options.allowDirty !== undefined ? { allowDirty: options.allowDirty } : {})
   });
   const applied = applyResult.status.startsWith("applied_");
   const commandResult = syntheticApplyCommandResult(repoPath, applyResult, Date.now() - startedAt);

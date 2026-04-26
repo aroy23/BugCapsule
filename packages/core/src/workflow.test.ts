@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { applyCapsule } from "./applyCapsule.js";
 import { createCapsule } from "./createCapsule.js";
 import { runFixStep } from "./fixStep.js";
+import { runShellCommand } from "./shell.js";
 import { writeInvoiceFixtureRepo } from "./testFixtures.js";
 import type { BugCapsuleManifest } from "./types.js";
 
@@ -62,6 +63,49 @@ describe("deterministic BugCapsule workflow", () => {
 
     await runFixStep({ repoPath, capsuleId: created.capsuleId, action: "verify_capsule" });
     const applied = await runFixStep({ repoPath, capsuleId: created.capsuleId, action: "apply_patch" });
+
+    expect(applied).toMatchObject({
+      status: "ok",
+      currentState: "applied",
+      requiredNextAction: "done",
+      applyResult: {
+        status: "applied_verified",
+        modifiedOriginalFiles: ["src/billing/customerAddress.ts"]
+      }
+    });
+  });
+
+  it("allows strict apply to override a dirty original repo when requested", async () => {
+    const repoPath = path.join(tempRoot, "dirty-strict-apply");
+    const created = await createFixtureCapsule(repoPath, "bc_dirty_strict_apply");
+
+    await runFixStep({ repoPath, capsuleId: created.capsuleId, action: "inspect" });
+    await runFixStep({ repoPath, capsuleId: created.capsuleId, action: "reproduce_initial" });
+    await writePassingCapsuleFix(created.capsulePath);
+    await runFixStep({ repoPath, capsuleId: created.capsuleId, action: "verify_capsule" });
+    await initializeGitCheckpoint(repoPath);
+    await fs.writeFile(path.join(repoPath, "README.md"), "local notes\n", "utf8");
+
+    await expect(runFixStep({
+      repoPath,
+      capsuleId: created.capsuleId,
+      action: "apply_patch"
+    })).resolves.toMatchObject({
+      status: "failed",
+      currentState: "capsule_passed",
+      requiredNextAction: "apply_patch",
+      applyResult: {
+        status: "failed",
+        message: "Original repo has uncommitted changes inside the target repo path. Re-run with allowDirty to override."
+      }
+    });
+
+    const applied = await runFixStep({
+      repoPath,
+      capsuleId: created.capsuleId,
+      action: "apply_patch",
+      allowDirty: true
+    });
 
     expect(applied).toMatchObject({
       status: "ok",
@@ -144,4 +188,10 @@ async function writePassingCapsuleFix(capsulePath: string): Promise<void> {
     "  const presentAddress = address as Address;\n  return `${presentAddress.line1}, ${presentAddress.city}, ${presentAddress.country}`;",
     "  if (!address) {\n    return \"\";\n  }\n\n  return `${address.line1}, ${address.city}, ${address.country}`;"
   ));
+}
+
+async function initializeGitCheckpoint(repoPath: string): Promise<void> {
+  await runShellCommand("git init", repoPath);
+  await runShellCommand("git add .", repoPath);
+  await runShellCommand("git -c user.name=BugCapsule -c user.email=bugcapsule@example.test commit -m initial", repoPath);
 }

@@ -286,6 +286,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         "Use this for strict BugCapsule capsules. It enforces the canonical workflow: inspect, reproduce_initial, verify_capsule, apply_patch.",
         "If called out of order, it returns the required next action and does not mutate source files.",
         "Apply-back succeeds only when the current editable capsule file set exactly matches a passing verify_capsule receipt.",
+        "Set allowDirty=true on apply_patch to intentionally apply into a dirty original repo.",
         "When the target repo has .bugcapsule/pricing.json, a successful apply_patch generates an evaluation report unless generateEvaluation is false."
       ].join(" "),
       inputSchema: {
@@ -296,6 +297,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         evaluationModel: z.string().optional(),
         evaluationEncoding: z.string().optional(),
         openEvaluation: z.boolean().default(true),
+        allowDirty: z.boolean().default(false),
         inputPricePerMillion: z.number().nonnegative().optional(),
         outputPricePerMillion: z.number().nonnegative().optional()
       }
@@ -304,7 +306,8 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
       const result = await runFixStep({
         repoPath: args.repoPath,
         capsuleId: args.capsuleId,
-        action: args.action
+        action: args.action,
+        allowDirty: args.allowDirty
       });
 
       if (args.action !== "apply_patch" || result.status !== "ok" || !result.applyResult?.status.startsWith("applied_")) {
@@ -611,6 +614,7 @@ function fixStepArguments(
     evaluationModel?: string;
     evaluationEncoding?: string;
     openEvaluation?: boolean;
+    allowDirty?: boolean;
     inputPricePerMillion?: number;
     outputPricePerMillion?: number;
   }
@@ -623,6 +627,7 @@ function fixStepArguments(
     ...(evaluationArgs?.evaluationModel ? { evaluationModel: evaluationArgs.evaluationModel } : {}),
     ...(evaluationArgs?.evaluationEncoding ? { evaluationEncoding: evaluationArgs.evaluationEncoding } : {}),
     ...(evaluationArgs?.openEvaluation !== undefined ? { openEvaluation: evaluationArgs.openEvaluation } : {}),
+    ...(evaluationArgs?.allowDirty !== undefined ? { allowDirty: evaluationArgs.allowDirty } : {}),
     ...(evaluationArgs?.inputPricePerMillion !== undefined ? { inputPricePerMillion: evaluationArgs.inputPricePerMillion } : {}),
     ...(evaluationArgs?.outputPricePerMillion !== undefined ? { outputPricePerMillion: evaluationArgs.outputPricePerMillion } : {})
   };

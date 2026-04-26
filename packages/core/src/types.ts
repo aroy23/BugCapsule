@@ -367,6 +367,7 @@ export type FixStepOptions = {
   repoPath: string;
   capsuleId: string;
   action: WorkflowAction;
+  allowDirty?: boolean;
 };
 
 export type FixStepResult = {
