@@ -236,7 +236,7 @@
       "cached_input_per_million": 0.03,
       "output_per_million": 1.5,
       "evaluation_encoding": "o200k_base",
-      "source": "User-provided Windsurf model selector screenshot",
+      "source": "Windsurf model usage",
       "verifiedAt": "2026-04-26"
     },
     {

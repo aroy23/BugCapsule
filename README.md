@@ -198,7 +198,7 @@ The resulting config is:
 
 Profiles live in `packages/mcp/pricing-catalog.json`. Current bundled profile examples include:
 
-- `windsurf:swe-1.6-fast` (`$0.30/M` input, `$0.03/M` cached input, `$1.50/M` output; source: user-provided Windsurf model selector screenshot)
+- `windsurf:swe-1.6-fast` (`$0.30/M` input, `$0.03/M` cached input, `$1.50/M` output; source: Windsurf model usage)
 - `anthropic:claude-sonnet-4.6`
 - `anthropic:claude-opus-4.7`
 - `openai:gpt-5.4`
