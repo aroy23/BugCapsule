@@ -1,13 +1,28 @@
 # BugCapsule
 
-BugCapsule is local-first MCP tooling that shrinks a failing behavior from a TypeScript repository into a small executable capsule an AI coding agent can fix.
+BugCapsule is local-first MCP tooling that shrinks a failing TypeScript/Node bug into a small executable capsule an AI coding agent can inspect, fix, verify, and apply back to the original repo.
 
-This repository is MCP-first. There is no standalone BugCapsule CLI or installable agent skill package. Agents use the local MCP server and call BugCapsule tools directly.
+It is MCP-first: there is no standalone CLI or installable agent skill package. Agents use the local MCP server and call BugCapsule tools directly.
 
-## Repository Layout
+## Supporting Repos
 
-- `@bugcapsule/core` contains capsule creation, verification, and apply-back logic.
-- `@bugcapsule/mcp` exposes BugCapsule as a local MCP server.
+- Demo test repo: [BugCapsuleDemo](https://github.com/aroy23/BugCapsuleDemo)
+- Stress testing suite: [BugCapsuleTesting](https://github.com/aroy23/BugCapsuleTesting)
+
+## Packages
+
+- `@bugcapsule/core`: capsule creation, slicing, verification, and apply-back logic.
+- `@bugcapsule/mcp`: local stdio MCP server that exposes BugCapsule tools.
+
+## Implementation
+
+- Determinism: `bugcapsule_fix_step` enforces an ordered workflow: inspect, reproduce, verify, then apply. Capsules use manifests, file hashes, locked support files, and verification receipts so patches are applied back only after the focused repro passes.
+- Technologies: BugCapsule is built with TypeScript, Node.js, MCP stdio, `ts-morph`/TypeScript compiler tooling, `tsx`, npm, Vitest, local browser/runtime probing, and `js-tiktoken` for evaluation token estimates.
+- Capsule boundary: capsulation starts from a failing command or captured runtime stack trace, then follows stack frames, TypeScript imports, upstream candidates, and required support files. It excludes large or unsafe artifacts such as `node_modules`, build outputs, coverage, and secrets while preserving enough code to reproduce the same failure.
+
+## Effectiveness
+
+BugCapsule was tested on a demo checkout bug and a 10-project stress-testing suite with one distinct runtime bug per project. In the stress suite, capsules reduced debugging context by about 77% on average while preserving executable failures, and on the demo repo SWE-1.6 Fast failed alone but succeeded when guided through BugCapsule.
 
 ## Local Development
 
@@ -17,30 +32,21 @@ npm run build
 npm test
 ```
 
-The local MCP server entry point is `packages/mcp/dist/server.js`. Use an absolute path in IDE config. From the BugCapsule repo root, print it with:
+After changing `packages/core` or `packages/mcp`, run `npm run build` so your IDE uses the latest `dist` files.
+
+Print the absolute MCP server path:
 
 ```bash
 node -e 'console.log(require("node:path").resolve("packages/mcp/dist/server.js"))'
 ```
 
-Run `npm run build` after changing the server or core package so your IDE uses the latest `dist` files.
+## MCP IDE Setup
 
-## Add BugCapsule To An MCP IDE
+BugCapsule runs as a stdio MCP server. Use the absolute path to `packages/mcp/dist/server.js`.
 
-BugCapsule runs as a stdio MCP server. The important configuration is always:
+### Windsurf / Cursor
 
-```json
-{
-  "command": "node",
-  "args": [
-    "/absolute/path/to/BugCapsule/packages/mcp/dist/server.js"
-  ]
-}
-```
-
-### Windsurf
-
-Open `Settings` -> `Tools` -> `Windsurf Settings` -> `Add Server`, then use the raw MCP config editor and add:
+Add this to the IDE MCP config:
 
 ```json
 {
@@ -55,32 +61,14 @@ Open `Settings` -> `Tools` -> `Windsurf Settings` -> `Add Server`, then use the 
 }
 ```
 
-Refresh MCP servers after saving. Windsurf also supports editing its MCP config JSON directly; current Windsurf docs describe `~/.codeium/mcp_config.json` for this raw config.
+References:
 
-Reference: [Windsurf Cascade MCP docs](https://docs.windsurf.com/plugins/cascade/mcp)
-
-### Cursor
-
-Add the same `mcpServers` entry to your Cursor MCP config. For a project-local config, create or edit `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "bugcapsule": {
-      "command": "node",
-      "args": [
-        "/absolute/path/to/BugCapsule/packages/mcp/dist/server.js"
-      ]
-    }
-  }
-}
-```
-
-Reference: [Cursor MCP docs](https://docs.cursor.com/advanced/model-context-protocol)
+- [Windsurf Cascade MCP docs](https://docs.windsurf.com/plugins/cascade/mcp)
+- [Cursor MCP docs](https://docs.cursor.com/advanced/model-context-protocol)
 
 ### VS Code
 
-VS Code uses a `servers` object rather than `mcpServers`. Create or edit `.vscode/mcp.json`:
+VS Code uses `servers` instead of `mcpServers`:
 
 ```json
 {
@@ -98,125 +86,71 @@ VS Code uses a `servers` object rather than `mcpServers`. Create or edit `.vscod
 
 Reference: [VS Code MCP server docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)
 
-## Prompting BugCapsule
+## Prompting
 
-Use short prompts. The agent should choose the right BugCapsule MCP tool from the information you give it.
-
-### Best case: local URL plus symptom
-
-Use this when you can open the broken app locally but do not know a failing test command.
+For a local runtime bug:
 
 ```text
 Use BugCapsule to fix this.
-repoPath: /Users/arnav/Desktop/Demo
+repoPath: /path/to/Demo
 url: http://localhost:4177
-bug: The Complete Checkout button does not work.
+bug: The checkout page looks normal, but clicking "Place the order" fails.
 ```
 
-Expected MCP flow:
-
-1. Call `bugcapsule_create_from_runtime`.
-2. Probe same-origin page interactions from the URL.
-3. Capture the server-side stack and generated runtime repro.
-4. Create a minimized capsule.
-5. Follow `deterministicWorkflow.nextToolCall`.
-6. Fix only mapped editable capsule files.
-7. Call `bugcapsule_fix_step` with `action: "verify_capsule"` until the capsule passes.
-8. Call `bugcapsule_fix_step` with `action: "apply_patch"`.
-
-This path does not require you to provide an exact error-producing command.
-
-### If you already have a failing command
+For a known failing command:
 
 ```text
 Use BugCapsule to fix this.
-repoPath: /Users/arnav/Desktop/Demo
+repoPath: /path/to/Demo
 command: npm test -- checkout-missing-shipping-address
 ```
 
-Expected MCP flow:
-
-1. Call `bugcapsule_create_from_command`.
-2. Follow `deterministicWorkflow.nextToolCall`.
-3. Fix only mapped editable capsule files.
-4. Call `bugcapsule_fix_step` with `action: "verify_capsule"` until the capsule passes.
-5. Call `bugcapsule_fix_step` with `action: "apply_patch"`.
-
-### If you only have a description
+For an ambiguous bug description:
 
 ```text
 Use BugCapsule to fix this.
-repoPath: /Users/arnav/Desktop/Demo
+repoPath: /path/to/Demo
 bug: Checkout fails when the customer has no shipping address.
 ```
 
-Expected MCP flow:
-
-1. Call `bugcapsule_suggest_repro`.
-2. Use returned candidate commands, related files, or dev-server hints to find a runnable reproduction.
-3. If a local URL is available, call `bugcapsule_create_from_runtime`.
-4. If a failing command is confirmed, call `bugcapsule_create_from_command`.
-
-Description-only ambiguity handling exists, but it cannot always create a capsule by itself. BugCapsule can rank likely tests, scripts, dev-server commands, and related source files from the description. To create an executable capsule, it still needs either a local URL it can probe or a confirmed failing command it can run.
+If only a description is provided, BugCapsule can suggest likely commands, files, and dev-server hints. To create an executable capsule, it still needs either a local URL it can probe or a confirmed failing command it can run.
 
 ## MCP Tools
 
-- `bugcapsule_suggest_repro`: use for ambiguous prompts with only a repo path, description, URL, or visible error text.
-- `bugcapsule_create_from_runtime`: use when the user provides a local URL and broad runtime symptom.
-- `bugcapsule_create_from_command`: use when the user provides or confirms a failing command.
-- `bugcapsule_inspect`: read capsule manifest and README.
-- `bugcapsule_run`: run a capsule repro through MCP.
-- `bugcapsule_verify`: rerun capsule and original verification checks.
-- `bugcapsule_fix_step`: deterministic strict workflow gate for inspect, initial reproduction, capsule verification, and apply-back.
-- `bugcapsule_apply_patch`: legacy-compatible apply tool. Strict workflow capsules must apply through `bugcapsule_fix_step`.
+- `bugcapsule_suggest_repro`: finds likely repro commands, files, or runtime hints from partial bug context.
+- `bugcapsule_create_from_runtime`: probes a local URL, captures the failure, derives a source repro, and creates a capsule.
+- `bugcapsule_create_from_command`: creates a capsule from a confirmed failing command.
+- `bugcapsule_inspect`: reads capsule manifest and guidance.
+- `bugcapsule_run`: runs the capsule repro.
+- `bugcapsule_verify`: reruns capsule and original verification checks.
+- `bugcapsule_fix_step`: deterministic workflow gate for inspect, reproduce, verify, and apply-back.
+- `bugcapsule_apply_patch`: legacy-compatible apply tool; strict workflow capsules should apply through `bugcapsule_fix_step`.
 
-## Evaluation Prompt Add-On
+## Typical Agent Flow
 
-BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html` after deterministic apply-back through `bugcapsule_fix_step`. Configure the model price once for the target repo; after that, successful apply-back generates evaluation automatically. Pass `generateEvaluation: false` on an apply call to opt out for one run.
+1. Create a capsule from runtime or command.
+2. Inspect the manifest and mapped editable files.
+3. Reproduce the failure inside the capsule.
+4. Fix only mapped editable files.
+5. Verify the capsule passes.
+6. Apply the verified patch back to the original repo.
 
-The apply result includes a top-level `evaluationReport.htmlUrl`, `evaluationReport.openCommand`, and `nextAgentInstruction` so the report can be opened directly from the agent response. Evaluation reports open automatically by default after generation; pass `openEvaluation: false` to `bugcapsule_fix_step` or `bugcapsule_apply_patch` to suppress auto-open for one run.
+## Evaluation Reports
 
-If `.bugcapsule` does not exist yet, the CLI creates it and writes `.bugcapsule/pricing.json` before any capsule is created:
+After deterministic apply-back, BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html`. Configure pricing once per target repo:
 
 ```bash
 npm run pricing -- --repo /path/to/repo --profile windsurf:swe-1.6-fast
 ```
 
-List available profiles:
+List bundled pricing profiles:
 
 ```bash
 npm run pricing -- --list
 ```
 
-The resulting config is:
+If `.bugcapsule/pricing.json` is missing, evaluation stays off unless pricing is passed directly with the apply request. For non-OpenAI models, `evaluation_encoding` is a deterministic local tokenizer proxy, not provider-exact tokenization.
 
-```json
-{
-  "profile": "windsurf:swe-1.6-fast"
-}
-```
+## Current Scope
 
-Profiles live in `packages/mcp/pricing-catalog.json`. Current bundled profile examples include:
-
-- `windsurf:swe-1.6-fast` (`$0.30/M` input, `$0.03/M` cached input, `$1.50/M` output; source: Windsurf model usage)
-- `anthropic:claude-sonnet-4.6`
-- `anthropic:claude-opus-4.7`
-- `openai:gpt-5.4`
-- `openai:gpt-5.4-mini`
-- `openai:gpt-5.3-codex`
-- `google:gemini-2.5-pro`
-- `google:gemini-2.5-flash`
-- `google:gemini-3-flash-preview`
-
-Manual overrides still work:
-
-```json
-{
-  "profile": "windsurf:swe-1.6-fast",
-  "input_per_million": 0.3,
-  "output_per_million": 1.5,
-  "evaluation_encoding": "o200k_base"
-}
-```
-
-If a repo does not have `.bugcapsule/pricing.json`, evaluation stays off unless `generateEvaluation: true` or explicit pricing fields are provided on `bugcapsule_apply_patch` or the final `bugcapsule_fix_step` apply action. For non-OpenAI models, `evaluation_encoding` is a deterministic local tokenizer proxy, not provider-exact tokenization. Supported `js-tiktoken` encodings include `o200k_base`, `cl100k_base`, `p50k_base`, `r50k_base`, and `gpt2`.
+BugCapsule currently targets TypeScript/Node projects. The capsule idea is language-agnostic, but this implementation relies on TypeScript-aware stack parsing, import graphing, repro generation, and `tsx` execution.
