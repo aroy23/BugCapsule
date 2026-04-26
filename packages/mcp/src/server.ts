@@ -22,7 +22,7 @@ import {
 } from "@bugcapsule/core";
 
 import { SessionTracker } from "./usage/sessionTracker.js";
-import { loadPricing } from "./usage/pricing.js";
+import { resolveEvaluationConfig } from "./usage/evaluationConfig.js";
 import { registerTrackedTool } from "./usage/wrapTool.js";
 
 const server = new McpServer({
@@ -283,7 +283,8 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
       description: [
         "Use this for strict BugCapsule capsules. It enforces the canonical workflow: inspect, reproduce_initial, verify_capsule, apply_patch.",
         "If called out of order, it returns the required next action and does not mutate source files.",
-        "Apply-back succeeds only when the current editable capsule file set exactly matches a passing verify_capsule receipt."
+        "Apply-back succeeds only when the current editable capsule file set exactly matches a passing verify_capsule receipt.",
+        "When the target repo has .bugcapsule/pricing.json, a successful apply_patch generates an evaluation report unless generateEvaluation is false."
       ].join(" "),
       inputSchema: {
         repoPath: z.string(),
@@ -345,7 +346,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
     "bugcapsule_apply_patch",
     {
       title: "Apply BugCapsule Patch",
-      description: "Apply changed capsule files back to their original source paths. Legacy-compatible tool; strict workflow capsules must apply through bugcapsule_fix_step with action='apply_patch'.",
+      description: "Apply changed capsule files back to their original source paths. Legacy-compatible tool; strict workflow capsules must apply through bugcapsule_fix_step with action='apply_patch'. When the target repo has .bugcapsule/pricing.json, successful apply generates an evaluation report unless generateEvaluation is false.",
       inputSchema: {
         repoPath: z.string(),
         capsuleId: z.string(),
@@ -624,73 +625,6 @@ function workflowSummary(repoPath: string, manifest: BugCapsuleManifest): Record
       tool: "bugcapsule_fix_step",
       arguments: fixStepArguments(repoPath, manifest.capsuleId, manifest.workflow.requiredNextAction === "done" ? "next" : manifest.workflow.requiredNextAction)
     }
-  };
-}
-
-type EvaluationConfig =
-  | { status: "disabled" }
-  | { status: "invalid"; message: string }
-  | {
-    status: "enabled";
-    evaluationModel: string;
-    evaluationEncoding?: string;
-    inputPricePerMillion: number;
-    outputPricePerMillion: number;
-  };
-
-async function resolveEvaluationConfig(args: {
-  repoPath: string;
-  generateEvaluation?: boolean;
-  evaluationModel?: string;
-  evaluationEncoding?: string;
-  inputPricePerMillion?: number;
-  outputPricePerMillion?: number;
-}): Promise<EvaluationConfig> {
-  const hasAnyEvaluationInput = args.generateEvaluation !== undefined ||
-    Boolean(args.evaluationModel || args.evaluationEncoding) ||
-    args.inputPricePerMillion !== undefined ||
-    args.outputPricePerMillion !== undefined;
-
-  if (!hasAnyEvaluationInput || args.generateEvaluation === false) {
-    return { status: "disabled" };
-  }
-
-  let pricing;
-  try {
-    pricing = await loadPricing(args.repoPath);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      status: "invalid",
-      message: `Evaluation was requested, but pricing configuration is invalid: ${message}`
-    };
-  }
-
-  const evaluationModel = args.evaluationModel ?? pricing.model;
-  const inputPricePerMillion = args.inputPricePerMillion ?? pricing.input_per_million;
-  const outputPricePerMillion = args.outputPricePerMillion ?? pricing.output_per_million;
-  const evaluationEncoding = args.evaluationEncoding ?? (!args.evaluationModel ? pricing.evaluation_encoding : undefined);
-
-  if (!evaluationModel) {
-    return {
-      status: "invalid",
-      message: "Evaluation was requested, but evaluationModel is missing."
-    };
-  }
-
-  if (inputPricePerMillion === undefined || outputPricePerMillion === undefined) {
-    return {
-      status: "invalid",
-      message: "Evaluation was requested, but both inputPricePerMillion and outputPricePerMillion are required."
-    };
-  }
-
-  return {
-    status: "enabled",
-    evaluationModel,
-    ...(evaluationEncoding ? { evaluationEncoding } : {}),
-    inputPricePerMillion,
-    outputPricePerMillion
   };
 }
 

@@ -172,7 +172,7 @@ Description-only ambiguity handling exists, but it cannot always create a capsul
 
 ## Evaluation Prompt Add-On
 
-BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html` after deterministic apply-back through `bugcapsule_fix_step`. Evaluation is opt-in. Configure the model price once from the target repo root, then ask BugCapsule to generate evaluation.
+BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html` after deterministic apply-back through `bugcapsule_fix_step`. Configure the model price once for the target repo; after that, successful apply-back generates evaluation automatically. Pass `generateEvaluation: false` on an apply call to opt out for one run.
 
 If `.bugcapsule` does not exist yet, the CLI creates it and writes `.bugcapsule/pricing.json` before any capsule is created:
 
@@ -217,4 +217,4 @@ Manual overrides still work:
 }
 ```
 
-Use `generateEvaluation: true` on `bugcapsule_apply_patch` or the final `bugcapsule_fix_step` apply action. For non-OpenAI models, `evaluation_encoding` is a deterministic local tokenizer proxy, not provider-exact tokenization. Supported `js-tiktoken` encodings include `o200k_base`, `cl100k_base`, `p50k_base`, `r50k_base`, and `gpt2`.
+If a repo does not have `.bugcapsule/pricing.json`, evaluation stays off unless `generateEvaluation: true` or explicit pricing fields are provided on `bugcapsule_apply_patch` or the final `bugcapsule_fix_step` apply action. For non-OpenAI models, `evaluation_encoding` is a deterministic local tokenizer proxy, not provider-exact tokenization. Supported `js-tiktoken` encodings include `o200k_base`, `cl100k_base`, `p50k_base`, `r50k_base`, and `gpt2`.

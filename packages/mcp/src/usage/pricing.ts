@@ -53,6 +53,22 @@ export async function loadPricing(repoPath: string): Promise<Pricing> {
   return { ...DEFAULT_PRICING };
 }
 
+export async function hasRepoPricingConfig(repoPath: string): Promise<boolean> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(repoPath, ".bugcapsule", "pricing.json"), "utf8");
+  } catch {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === "object" && parsed !== null && Object.keys(parsed).length > 0;
+  } catch {
+    return true;
+  }
+}
+
 export async function loadPricingCatalog(): Promise<PricingCatalogProfile[]> {
   for (const candidate of bundledPricingCatalogCandidates()) {
     const catalog = await tryReadPricingCatalog(candidate);
