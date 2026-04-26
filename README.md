@@ -4,6 +4,8 @@ BugCapsule is local-first MCP tooling that shrinks a failing TypeScript/Node bug
 
 It is MCP-first: there is no standalone CLI or installable agent skill package. Agents use the local MCP server and call BugCapsule tools directly.
 
+**Report:** [View the BugCapsule research report PDF](docs/bugcapsule_report.pdf)
+
 ## Supporting Repos
 
 - Demo test repo: [BugCapsuleDemo](https://github.com/aroy23/BugCapsuleDemo)
