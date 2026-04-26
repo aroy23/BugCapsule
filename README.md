@@ -174,6 +174,8 @@ Description-only ambiguity handling exists, but it cannot always create a capsul
 
 BugCapsule can generate `.bugcapsule/evaluations/<capsule-id>/evaluation.html` after deterministic apply-back through `bugcapsule_fix_step`. Configure the model price once for the target repo; after that, successful apply-back generates evaluation automatically. Pass `generateEvaluation: false` on an apply call to opt out for one run.
 
+The apply result includes a top-level `evaluationReport.htmlUrl`, `evaluationReport.openCommand`, and `nextAgentInstruction` so the report can be opened directly from the agent response. Evaluation reports open automatically by default after generation; pass `openEvaluation: false` to `bugcapsule_fix_step` or `bugcapsule_apply_patch` to suppress auto-open for one run.
+
 If `.bugcapsule` does not exist yet, the CLI creates it and writes `.bugcapsule/pricing.json` before any capsule is created:
 
 ```bash

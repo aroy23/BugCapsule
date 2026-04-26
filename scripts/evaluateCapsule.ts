@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { encodingForModel, getEncoding, getEncodingNameForModel } from "js-tiktoken";
 
 import { loadPricing } from "../packages/mcp/src/usage/pricing.js";
@@ -115,6 +116,8 @@ type EvaluationReport = {
   };
   outputs: {
     htmlPath: string;
+    htmlUrl: string;
+    openCommand: string;
   };
 };
 
@@ -231,6 +234,8 @@ async function main(): Promise<void> {
   const measuredUsage = await buildMeasuredUsage(options);
   const baseName = "evaluation";
   const htmlPath = path.join(outputDir, `${baseName}.html`);
+  const htmlUrl = pathToFileURL(htmlPath).href;
+  const openCommand = openCommandFor(htmlPath);
 
   const report: EvaluationReport = {
     schemaVersion: "0.1",
@@ -284,7 +289,9 @@ async function main(): Promise<void> {
     },
     ...(measuredUsage ? { measuredUsage } : {}),
     outputs: {
-      htmlPath
+      htmlPath,
+      htmlUrl,
+      openCommand
     }
   };
 
@@ -760,6 +767,8 @@ function renderMarkdown(report: EvaluationReport): string {
   lines.push("## Visualization Files");
   lines.push("");
   lines.push(`- HTML: \`${report.outputs.htmlPath}\``);
+  lines.push(`- URL: ${report.outputs.htmlUrl}`);
+  lines.push(`- Open command: \`${report.outputs.openCommand}\``);
   lines.push("");
 
   return lines.join("\n");
@@ -1527,6 +1536,20 @@ function formatNumber(value: number | undefined): string {
 
 function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
+}
+
+function openCommandFor(filePath: string): string {
+  if (process.platform === "darwin") {
+    return `open ${shellQuote(filePath)}`;
+  }
+  if (process.platform === "win32") {
+    return `start "" "${filePath.replaceAll("\"", "\\\"")}"`;
+  }
+  return `xdg-open ${shellQuote(filePath)}`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function formatRatio(value: number): string {

@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -99,6 +99,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         generateEvaluation: z.boolean().optional(),
         evaluationModel: z.string().optional(),
         evaluationEncoding: z.string().optional(),
+        openEvaluation: z.boolean().default(true),
         inputPricePerMillion: z.number().nonnegative().optional(),
         outputPricePerMillion: z.number().nonnegative().optional()
       }
@@ -173,6 +174,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         generateEvaluation: z.boolean().optional(),
         evaluationModel: z.string().optional(),
         evaluationEncoding: z.string().optional(),
+        openEvaluation: z.boolean().default(true),
         inputPricePerMillion: z.number().nonnegative().optional(),
         outputPricePerMillion: z.number().nonnegative().optional()
       }
@@ -293,6 +295,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         generateEvaluation: z.boolean().optional(),
         evaluationModel: z.string().optional(),
         evaluationEncoding: z.string().optional(),
+        openEvaluation: z.boolean().default(true),
         inputPricePerMillion: z.number().nonnegative().optional(),
         outputPricePerMillion: z.number().nonnegative().optional()
       }
@@ -315,12 +318,15 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
       }
 
       if (evaluationConfig.status === "invalid") {
+        const evaluation = {
+          status: "failed" as const,
+          message: evaluationConfig.message
+        };
         return jsonResult({
+          evaluationReport: evaluationReportSummary(evaluation),
+          nextAgentInstruction: evaluationAgentInstruction(evaluation),
           ...result,
-          evaluation: {
-            status: "failed",
-            message: evaluationConfig.message
-          }
+          evaluation
         });
       }
 
@@ -329,11 +335,14 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         capsuleId: args.capsuleId,
         evaluationModel: evaluationConfig.evaluationModel,
         ...(evaluationConfig.evaluationEncoding ? { evaluationEncoding: evaluationConfig.evaluationEncoding } : {}),
+        openEvaluation: args.openEvaluation !== false,
         inputPricePerMillion: evaluationConfig.inputPricePerMillion,
         outputPricePerMillion: evaluationConfig.outputPricePerMillion
       });
 
       return jsonResult({
+        evaluationReport: evaluationReportSummary(evaluation),
+        nextAgentInstruction: evaluationAgentInstruction(evaluation),
         ...result,
         evaluation
       });
@@ -356,6 +365,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         generateEvaluation: z.boolean().optional(),
         evaluationModel: z.string().optional(),
         evaluationEncoding: z.string().optional(),
+        openEvaluation: z.boolean().default(true),
         inputPricePerMillion: z.number().nonnegative().optional(),
         outputPricePerMillion: z.number().nonnegative().optional()
       }
@@ -376,12 +386,15 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
       }
 
       if (evaluationConfig.status === "invalid") {
+        const evaluation = {
+          status: "failed" as const,
+          message: evaluationConfig.message
+        };
         return jsonResult({
+          evaluationReport: evaluationReportSummary(evaluation),
+          nextAgentInstruction: evaluationAgentInstruction(evaluation),
           ...result,
-          evaluation: {
-            status: "failed",
-            message: evaluationConfig.message
-          }
+          evaluation
         });
       }
 
@@ -390,11 +403,14 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         capsuleId: args.capsuleId,
         evaluationModel: evaluationConfig.evaluationModel,
         ...(evaluationConfig.evaluationEncoding ? { evaluationEncoding: evaluationConfig.evaluationEncoding } : {}),
+        openEvaluation: args.openEvaluation !== false,
         inputPricePerMillion: evaluationConfig.inputPricePerMillion,
         outputPricePerMillion: evaluationConfig.outputPricePerMillion
       });
 
       return jsonResult({
+        evaluationReport: evaluationReportSummary(evaluation),
+        nextAgentInstruction: evaluationAgentInstruction(evaluation),
         ...result,
         evaluation
       });
@@ -594,6 +610,7 @@ function fixStepArguments(
     generateEvaluation?: boolean;
     evaluationModel?: string;
     evaluationEncoding?: string;
+    openEvaluation?: boolean;
     inputPricePerMillion?: number;
     outputPricePerMillion?: number;
   }
@@ -605,6 +622,7 @@ function fixStepArguments(
     ...(evaluationArgs?.generateEvaluation !== undefined ? { generateEvaluation: evaluationArgs.generateEvaluation } : {}),
     ...(evaluationArgs?.evaluationModel ? { evaluationModel: evaluationArgs.evaluationModel } : {}),
     ...(evaluationArgs?.evaluationEncoding ? { evaluationEncoding: evaluationArgs.evaluationEncoding } : {}),
+    ...(evaluationArgs?.openEvaluation !== undefined ? { openEvaluation: evaluationArgs.openEvaluation } : {}),
     ...(evaluationArgs?.inputPricePerMillion !== undefined ? { inputPricePerMillion: evaluationArgs.inputPricePerMillion } : {}),
     ...(evaluationArgs?.outputPricePerMillion !== undefined ? { outputPricePerMillion: evaluationArgs.outputPricePerMillion } : {})
   };
@@ -678,6 +696,7 @@ type EvaluationOptions = {
   capsuleId: string;
   evaluationModel: string;
   evaluationEncoding?: string;
+  openEvaluation?: boolean;
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
 };
@@ -685,10 +704,40 @@ type EvaluationOptions = {
 type EvaluationResult = {
   status: "created" | "failed";
   htmlPath?: string;
+  htmlUrl?: string;
+  openCommand?: string;
+  opened?: boolean;
+  openError?: string;
   command: string;
   message?: string;
   stderr?: string;
 };
+
+type EvaluationReportSummary = {
+  status: EvaluationResult["status"];
+  htmlUrl?: string;
+  openCommand?: string;
+  htmlPath?: string;
+  opened?: boolean;
+  openError?: string;
+  message?: string;
+};
+
+function evaluationAgentInstruction(evaluation: EvaluationReportSummary): string {
+  if (evaluation.status === "created" && evaluation.htmlUrl) {
+    const openHint = evaluation.opened === true
+      ? "The report was opened automatically."
+      : evaluation.openCommand
+        ? `If it did not open automatically, tell the user they can run: ${evaluation.openCommand}`
+        : "";
+    return [
+      `Tell the user the BugCapsule evaluation report is ready: ${evaluation.htmlUrl}`,
+      openHint
+    ].filter(Boolean).join(" ");
+  }
+
+  return `Tell the user BugCapsule evaluation was not created: ${evaluation.message ?? "unknown error"}.`;
+}
 
 async function runEvaluation(options: EvaluationOptions): Promise<EvaluationResult> {
   const bugCapsuleRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -736,10 +785,36 @@ async function runEvaluation(options: EvaluationOptions): Promise<EvaluationResu
     };
   }
 
-  return {
+  const htmlUrl = parsed.htmlUrl ?? pathToFileURL(parsed.htmlPath).href;
+  const openCommand = parsed.openCommand ?? openCommandFor(parsed.htmlPath);
+  const created: EvaluationResult = {
     status: "created",
     htmlPath: parsed.htmlPath,
+    htmlUrl,
+    openCommand,
     command
+  };
+
+  if (options.openEvaluation !== false) {
+    const openResult = await openEvaluationFile(parsed.htmlPath);
+    created.opened = openResult.opened;
+    if (openResult.openError) {
+      created.openError = openResult.openError;
+    }
+  }
+
+  return created;
+}
+
+function evaluationReportSummary(evaluation: EvaluationReportSummary): EvaluationReportSummary {
+  return {
+    status: evaluation.status,
+    ...(evaluation.htmlUrl ? { htmlUrl: evaluation.htmlUrl } : {}),
+    ...(evaluation.openCommand ? { openCommand: evaluation.openCommand } : {}),
+    ...(evaluation.htmlPath ? { htmlPath: evaluation.htmlPath } : {}),
+    ...(evaluation.opened !== undefined ? { opened: evaluation.opened } : {}),
+    ...(evaluation.openError ? { openError: evaluation.openError } : {}),
+    ...(evaluation.message ? { message: evaluation.message } : {})
   };
 }
 
@@ -771,7 +846,7 @@ function runProcess(command: string, args: string[], cwd: string): Promise<{ exi
   });
 }
 
-function parseEvaluationOutput(stdout: string): { htmlPath?: string } | undefined {
+function parseEvaluationOutput(stdout: string): { htmlPath?: string; htmlUrl?: string; openCommand?: string } | undefined {
   const match = stdout.match(/\{[\s\S]*\}\s*$/);
 
   if (!match) {
@@ -779,10 +854,44 @@ function parseEvaluationOutput(stdout: string): { htmlPath?: string } | undefine
   }
 
   try {
-    return JSON.parse(match[0]) as { htmlPath?: string };
+    return JSON.parse(match[0]) as { htmlPath?: string; htmlUrl?: string; openCommand?: string };
   } catch {
     return undefined;
   }
+}
+
+async function openEvaluationFile(filePath: string): Promise<{ opened: boolean; openError?: string }> {
+  const opener = openerFor(filePath);
+  const result = await runProcess(opener.command, opener.args, path.dirname(filePath));
+
+  if (result.exitCode === 0) {
+    return { opened: true };
+  }
+
+  return {
+    opened: false,
+    openError: result.stderr.trim() || `Open command exited with code ${result.exitCode}.`
+  };
+}
+
+function openerFor(filePath: string): { command: string; args: string[] } {
+  if (process.platform === "darwin") {
+    return { command: "open", args: [filePath] };
+  }
+  if (process.platform === "win32") {
+    return { command: "cmd", args: ["/c", "start", "", filePath] };
+  }
+  return { command: "xdg-open", args: [filePath] };
+}
+
+function openCommandFor(filePath: string): string {
+  if (process.platform === "darwin") {
+    return `open ${shellQuote(filePath)}`;
+  }
+  if (process.platform === "win32") {
+    return `start "" "${filePath.replaceAll("\"", "\\\"")}"`;
+  }
+  return `xdg-open ${shellQuote(filePath)}`;
 }
 
 function shellQuote(value: string): string {
