@@ -31,14 +31,26 @@ describe("evaluation config", () => {
     });
   });
 
-  it("does not enable evaluation by default without repo pricing config", async () => {
-    await expect(resolveEvaluationConfig({ repoPath: tempRoot })).resolves.toEqual({ status: "disabled" });
+  it("enables evaluation by default from bundled pricing without repo pricing config", async () => {
+    await expect(resolveEvaluationConfig({ repoPath: tempRoot })).resolves.toEqual({
+      status: "enabled",
+      evaluationModel: "claude-sonnet-4.6",
+      evaluationEncoding: "o200k_base",
+      inputPricePerMillion: 3,
+      outputPricePerMillion: 15
+    });
   });
 
-  it("does not auto-enable from an empty repo pricing config", async () => {
+  it("uses bundled pricing for an empty repo pricing config", async () => {
     await writeRepoPricing({});
 
-    await expect(resolveEvaluationConfig({ repoPath: tempRoot })).resolves.toEqual({ status: "disabled" });
+    await expect(resolveEvaluationConfig({ repoPath: tempRoot })).resolves.toEqual({
+      status: "enabled",
+      evaluationModel: "claude-sonnet-4.6",
+      evaluationEncoding: "o200k_base",
+      inputPricePerMillion: 3,
+      outputPricePerMillion: 15
+    });
   });
 
   it("allows generateEvaluation false to opt out even when repo pricing is configured", async () => {

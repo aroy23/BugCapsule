@@ -263,6 +263,61 @@ export function normalizeShippingAddress(address: Address | null): NormalizedAdd
       "src/checkout/normalizeAddress.ts"
     ]));
   });
+
+  it("re-roots nested workspace runtime apps before creating a server interaction repro", async () => {
+    const repoPath = path.join(tempRoot, "stress-workspace");
+    const appPath = path.join(repoPath, "08-csv-import-decoder");
+    await writeNestedCsvImportWorkspace(repoPath);
+    const baseUrl = await startServer((request, response) => {
+      const requestUrl = new URL(request.url ?? "/", "http://localhost");
+
+      if (request.method === "GET" && requestUrl.pathname === "/") {
+        response.writeHead(200, { "content-type": "text/html" });
+        response.end("<button>Import products</button><script>fetch('/api/run', { method: 'POST' })</script>");
+        return;
+      }
+
+      if (request.method === "POST" && requestUrl.pathname === "/api/run") {
+        response.writeHead(500, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          error: "URI malformed"
+        }));
+        return;
+      }
+
+      response.writeHead(404);
+      response.end();
+    });
+
+    const result = await createCapsuleFromRuntime({
+      repoPath,
+      url: baseUrl,
+      bugDescription: "The product import page fails for a product name containing a percent sign.",
+      capsuleId: "bc_runtime_nested_csv",
+      installDependencies: false,
+      verifyCapsule: false
+    });
+
+    if (!("capsulePath" in result)) {
+      throw new Error(result.message);
+    }
+
+    expect(result.status).toBe("created_failing");
+    expect(result.manifest.originalRepo.rootPath).toBe(appPath);
+    expect(result.generatedRepro).toEqual(expect.objectContaining({
+      targetExport: {
+        file: "src/web/server.ts",
+        name: "runtimeInteraction"
+      },
+      inputSource: "runtime interaction POST /api/run"
+    }));
+    expect(result.manifest.files.map((file) => file.capsulePath)).toEqual(expect.arrayContaining([
+      ".bugcapsule/repros/bc_runtime_nested_csv.ts",
+      "src/web/server.ts",
+      "src/importer/products.ts",
+      "src/importer/cellDecoder.ts"
+    ]));
+  });
 });
 
 async function startServer(handler: http.RequestListener): Promise<string> {
@@ -467,6 +522,142 @@ const server = createServer((request, response) => {
       });
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(result));
+    } catch (error) {
+      console.error(error);
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error)
+      }));
+    }
+    return;
+  }
+
+  response.writeHead(404);
+  response.end();
+});
+
+server.listen(port);
+`);
+}
+
+async function writeNestedCsvImportWorkspace(repoPath: string): Promise<void> {
+  await fs.rm(repoPath, { recursive: true, force: true });
+  await writeFile(repoPath, "package.json", `${JSON.stringify({
+    name: "runtime-nested-workspace",
+    private: true,
+    workspaces: [
+      "01-distractor",
+      "08-csv-import-decoder"
+    ]
+  }, null, 2)}\n`);
+  await writeFile(repoPath, "01-distractor/package.json", `${JSON.stringify({
+    name: "runtime-distractor",
+    private: true,
+    type: "module"
+  }, null, 2)}\n`);
+  await writeFile(repoPath, "01-distractor/src/web/server.ts", `import { createServer } from "node:http";
+
+const port = Number(process.env.PORT ?? "4177");
+
+const server = createServer((request, response) => {
+  const requestUrl = new URL(request.url ?? "/", "http://localhost");
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/run") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  response.writeHead(404);
+  response.end();
+});
+
+server.listen(port);
+`);
+
+  const appPath = path.join(repoPath, "08-csv-import-decoder");
+  await writeFile(appPath, "package.json", `${JSON.stringify({
+    name: "runtime-csv-import-decoder",
+    private: true,
+    type: "module",
+    devDependencies: {
+      tsx: "^4.20.0",
+      typescript: "^6.0.3"
+    }
+  }, null, 2)}\n`);
+  await writeFile(appPath, "tsconfig.json", `${JSON.stringify({
+    compilerOptions: {
+      target: "ES2022",
+      module: "NodeNext",
+      moduleResolution: "NodeNext",
+      strict: true,
+      esModuleInterop: true,
+      skipLibCheck: true,
+      types: ["node"]
+    },
+    include: ["src/**/*.ts", ".bugcapsule/**/*.ts"]
+  }, null, 2)}\n`);
+
+  try {
+    await fs.symlink(path.resolve("node_modules"), path.join(appPath, "node_modules"), "dir");
+  } catch {
+    // The test can still use npx's normal resolution path if the symlink cannot be created.
+  }
+
+  await writeFile(appPath, "src/importer/cellDecoder.ts", `export function decodeCell(raw: string): string {
+  return decodeURIComponent(raw.trim());
+}
+`);
+  await writeFile(appPath, "src/importer/csv.ts", `import { decodeCell } from "./cellDecoder.js";
+
+export function parseCsvLine(line: string): string[] {
+  return line.split(",").map((cell) => decodeCell(cell));
+}
+`);
+  await writeFile(appPath, "src/importer/products.ts", `import { parseCsvLine } from "./csv.js";
+
+export function importProducts(csv: string): { accepted: number; rows: Array<{ sku: string; name: string; priceCents: number }> } {
+  const rows = csv.trim().split(/\\r?\\n/).slice(1).map((line) => {
+    const [sku, name, price] = parseCsvLine(line);
+
+    return {
+      sku: sku ?? "",
+      name: name ?? "",
+      priceCents: Number(price ?? 0)
+    };
+  });
+
+  return { accepted: rows.length, rows };
+}
+`);
+  await writeFile(appPath, "src/web/server.ts", `import { createServer } from "node:http";
+
+import { importProducts } from "../importer/products.js";
+
+const port = Number(process.env.PORT ?? "4177");
+
+function runScenario(): { message: string } {
+  const summary = importProducts([
+    "sku,name,priceCents",
+    "TOWEL-50,50% cotton towel,1299"
+  ].join("\\n"));
+
+  return { message: "Imported " + summary.accepted + " product" };
+}
+
+const server = createServer((request, response) => {
+  const requestUrl = new URL(request.url ?? "/", "http://localhost");
+
+  if (request.method === "GET" && requestUrl.pathname === "/") {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end("<button>Import products</button><script>fetch('/api/run', { method: 'POST' })</script>");
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/run") {
+    try {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(runScenario()));
     } catch (error) {
       console.error(error);
       response.writeHead(500, { "content-type": "application/json" });

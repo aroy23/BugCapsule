@@ -1,4 +1,4 @@
-import { hasRepoPricingConfig, loadPricing } from "./pricing.js";
+import { loadPricing } from "./pricing.js";
 
 export type EvaluationConfig =
   | { status: "disabled" }
@@ -19,17 +19,7 @@ export async function resolveEvaluationConfig(args: {
   inputPricePerMillion?: number;
   outputPricePerMillion?: number;
 }): Promise<EvaluationConfig> {
-  const hasAnyEvaluationInput = args.generateEvaluation !== undefined ||
-    Boolean(args.evaluationModel || args.evaluationEncoding) ||
-    args.inputPricePerMillion !== undefined ||
-    args.outputPricePerMillion !== undefined;
-
   if (args.generateEvaluation === false) {
-    return { status: "disabled" };
-  }
-
-  const hasConfiguredPricing = await hasRepoPricingConfig(args.repoPath);
-  if (!hasAnyEvaluationInput && !hasConfiguredPricing) {
     return { status: "disabled" };
   }
 

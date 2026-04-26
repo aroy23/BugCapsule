@@ -122,6 +122,8 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         return jsonResult(result);
       }
 
+      const runtimeRepoPath = result.manifest.originalRepo.rootPath;
+
       return jsonResult({
         capsuleId: result.capsuleId,
         status: result.status,
@@ -140,13 +142,13 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
           suspectedUpstreamCauses: result.manifest.suspectedUpstreamCauses ?? [],
           generatedMocks: result.manifest.mocks.map((mock) => mock.moduleName)
         },
-        deterministicWorkflow: workflowSummary(args.repoPath, result.manifest),
+        deterministicWorkflow: workflowSummary(runtimeRepoPath, result.manifest),
         agentWorkflow: buildAgentWorkflow(result),
         applyPatchToolCall: {
           tool: "bugcapsule_fix_step",
-          arguments: fixStepArguments(args.repoPath, result.capsuleId, "apply_patch", args)
+          arguments: fixStepArguments(runtimeRepoPath, result.capsuleId, "apply_patch", args)
         },
-        nextAgentInstruction: `Call bugcapsule_fix_step with repoPath='${args.repoPath}', capsuleId='${result.capsuleId}', action='inspect'. Follow the returned nextToolCall until action='apply_patch' succeeds.`
+        nextAgentInstruction: `Call bugcapsule_fix_step with repoPath='${runtimeRepoPath}', capsuleId='${result.capsuleId}', action='inspect'. Follow the returned nextToolCall until action='apply_patch' succeeds.`
       });
     }
   );
@@ -287,7 +289,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
         "If called out of order, it returns the required next action and does not mutate source files.",
         "Apply-back succeeds only when the current editable capsule file set exactly matches a passing verify_capsule receipt.",
         "Set allowDirty=true on apply_patch to intentionally apply into a dirty original repo.",
-        "When the target repo has .bugcapsule/pricing.json, a successful apply_patch generates an evaluation report unless generateEvaluation is false."
+        "A successful apply_patch generates an evaluation report unless generateEvaluation is false."
       ].join(" "),
       inputSchema: {
         repoPath: z.string(),
@@ -358,7 +360,7 @@ function registerTools(mcp: McpServer, tracker: SessionTracker): void {
     "bugcapsule_apply_patch",
     {
       title: "Apply BugCapsule Patch",
-      description: "Apply changed capsule files back to their original source paths. Legacy-compatible tool; strict workflow capsules must apply through bugcapsule_fix_step with action='apply_patch'. When the target repo has .bugcapsule/pricing.json, successful apply generates an evaluation report unless generateEvaluation is false.",
+      description: "Apply changed capsule files back to their original source paths. Legacy-compatible tool; strict workflow capsules must apply through bugcapsule_fix_step with action='apply_patch'. Successful apply generates an evaluation report unless generateEvaluation is false.",
       inputSchema: {
         repoPath: z.string(),
         capsuleId: z.string(),

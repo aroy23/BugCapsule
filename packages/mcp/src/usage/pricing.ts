@@ -141,6 +141,10 @@ async function tryReadPricing(filePath: string): Promise<Pricing | null> {
   }
 
   const parsed = JSON.parse(raw) as PricingConfig;
+  if (parsed && typeof parsed === "object" && Object.keys(parsed).length === 0) {
+    return null;
+  }
+
   return resolvePricingConfig(parsed);
 }
 

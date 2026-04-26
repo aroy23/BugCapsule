@@ -41,11 +41,11 @@ type RuntimeLineageFile = {
 };
 
 export async function createCapsuleFromRuntime(options: CreateCapsuleFromRuntimeOptions): Promise<CreateCapsuleFromRuntimeResult> {
-  const repoPath = path.resolve(options.repoPath);
-  assertInsideRoot(repoPath, repoPath);
+  const requestedRepoPath = path.resolve(options.repoPath);
+  assertInsideRoot(requestedRepoPath, requestedRepoPath);
 
   const probe = await probeRuntime({
-    repoPath,
+    repoPath: requestedRepoPath,
     url: options.url,
     ...(options.bugDescription ? { bugDescription: options.bugDescription } : {}),
     ...(options.interactionHint ? { interactionHint: options.interactionHint } : {})
@@ -54,7 +54,7 @@ export async function createCapsuleFromRuntime(options: CreateCapsuleFromRuntime
   if (probe.status === "probe_failed") {
     return {
       status: "runtime_probe_failed",
-      repoPath,
+      repoPath: requestedRepoPath,
       url: options.url,
       message: probe.message ?? "BugCapsule could not probe the runtime URL.",
       probe
@@ -64,33 +64,36 @@ export async function createCapsuleFromRuntime(options: CreateCapsuleFromRuntime
   if (probe.status !== "failure_found" || !probe.failure) {
     return {
       status: "no_runtime_failure_found",
-      repoPath,
+      repoPath: requestedRepoPath,
       url: options.url,
       message: "BugCapsule did not find a failing interaction on the page.",
       probe
     };
   }
 
-  const capsuleId = await resolveRuntimeCapsuleId(repoPath, options);
-  const generatedRepro = await buildGeneratedRuntimeRepro(repoPath, capsuleId, probe.failure, options);
+  const hintText = runtimeHintText(options, probe.failure);
+  const runtimeRepoPath = await resolveRuntimeRepoPath(requestedRepoPath, probe.failure, hintText);
+  const runtimeFailure = rebaseRuntimeFailure(probe.failure, requestedRepoPath, runtimeRepoPath);
+  const capsuleId = await resolveRuntimeCapsuleId(runtimeRepoPath, options);
+  const generatedRepro = await buildGeneratedRuntimeRepro(runtimeRepoPath, capsuleId, runtimeFailure, hintText);
 
   if (!generatedRepro) {
     return {
       status: "runtime_repro_unavailable",
-      repoPath,
+      repoPath: runtimeRepoPath,
       url: options.url,
       message: "BugCapsule found the runtime failure, but could not derive a self-contained source repro from the captured stack and page data.",
       probe
     };
   }
 
-  const originalReproPath = path.join(repoPath, generatedRepro.path);
-  assertInsideRoot(repoPath, originalReproPath);
+  const originalReproPath = path.join(runtimeRepoPath, generatedRepro.path);
+  assertInsideRoot(runtimeRepoPath, originalReproPath);
   await ensureDir(path.dirname(originalReproPath));
   await writeTextFile(originalReproPath, generatedRepro.content);
 
   const result = await createCapsule({
-    repoPath,
+    repoPath: runtimeRepoPath,
     command: generatedRepro.command,
     capsuleId,
     capsuleName: options.capsuleName ?? `Runtime bug: ${options.bugDescription ?? new URL(options.url).pathname}`,
@@ -106,7 +109,7 @@ export async function createCapsuleFromRuntime(options: CreateCapsuleFromRuntime
       requestBoundary: generatedRepro.input,
       requestBoundarySource: generatedRepro.inputSource
     },
-    ...(probe.failure.stackTrace.length > 0 ? { upstreamStackTrace: probe.failure.stackTrace } : {}),
+    ...(runtimeFailure.stackTrace.length > 0 ? { upstreamStackTrace: runtimeFailure.stackTrace } : {}),
     ...(generatedRepro.sliceStackTrace.length > 0 ? { sliceStackTrace: generatedRepro.sliceStackTrace } : {}),
     additionalFiles: [
       {
@@ -118,7 +121,7 @@ export async function createCapsuleFromRuntime(options: CreateCapsuleFromRuntime
       }
     ]
   });
-  await cleanupRuntimeReproArtifacts(repoPath, generatedRepro.path);
+  await cleanupRuntimeReproArtifacts(runtimeRepoPath, generatedRepro.path);
 
   return {
     ...result,
@@ -288,16 +291,12 @@ async function buildGeneratedRuntimeRepro(
   repoPath: string,
   capsuleId: string,
   failure: RuntimeFailure,
-  options: CreateCapsuleFromRuntimeOptions
+  hintText: string
 ): Promise<GeneratedRuntimeRepro | undefined> {
   const payload = await discoverInputPayload(failure);
 
   if (payload !== undefined) {
-    const target = await selectTargetExport(repoPath, capsuleId, failure, payload.value, [
-      options.bugDescription,
-      options.interactionHint,
-      failure.url
-    ].filter(Boolean).join(" "));
+    const target = await selectTargetExport(repoPath, capsuleId, failure, payload.value, hintText);
 
     if (target) {
       const reproPath = normalizePath(path.join(".bugcapsule", "repros", `${capsuleId}.ts`));
@@ -328,15 +327,16 @@ async function buildGeneratedRuntimeRepro(
     }
   }
 
-  return buildGeneratedServerInteractionRepro(repoPath, capsuleId, failure);
+  return buildGeneratedServerInteractionRepro(repoPath, capsuleId, failure, hintText);
 }
 
 async function buildGeneratedServerInteractionRepro(
   repoPath: string,
   capsuleId: string,
-  failure: RuntimeFailure
+  failure: RuntimeFailure,
+  hintText: string
 ): Promise<GeneratedRuntimeRepro | undefined> {
-  const serverFile = await findRuntimeServerFile(repoPath, failure);
+  const serverFile = await findRuntimeServerFile(repoPath, failure, hintText);
 
   if (!serverFile) {
     return undefined;
@@ -411,9 +411,82 @@ async function discoverInputPayload(failure: RuntimeFailure): Promise<{ value: u
   return undefined;
 }
 
-async function findRuntimeServerFile(repoPath: string, failure: RuntimeFailure): Promise<string | undefined> {
+async function resolveRuntimeRepoPath(
+  repoPath: string,
+  failure: RuntimeFailure,
+  hintText: string
+): Promise<string> {
+  const stackRepoPath = await nearestPackageRootFromStack(repoPath, failure.stackTrace);
+
+  if (stackRepoPath) {
+    return stackRepoPath;
+  }
+
+  return (await findRuntimeServerTarget(repoPath, failure, hintText))?.repoPath ?? repoPath;
+}
+
+async function nearestPackageRootFromStack(repoPath: string, stackTrace: StackFrame[]): Promise<string | undefined> {
+  for (const frame of stackTrace) {
+    const framePath = path.resolve(repoPath, frame.file);
+
+    if (!isInsideRoot(repoPath, framePath)) {
+      continue;
+    }
+
+    const packageRoot = await nearestPackageRoot(repoPath, framePath);
+
+    if (packageRoot !== repoPath) {
+      return packageRoot;
+    }
+  }
+
+  return undefined;
+}
+
+function rebaseRuntimeFailure(
+  failure: RuntimeFailure,
+  fromRepoPath: string,
+  toRepoPath: string
+): RuntimeFailure {
+  if (fromRepoPath === toRepoPath || failure.stackTrace.length === 0) {
+    return failure;
+  }
+
+  return {
+    ...failure,
+    stackTrace: failure.stackTrace.map((frame) => ({
+      ...frame,
+      file: rebaseRuntimeFrameFile(frame.file, fromRepoPath, toRepoPath)
+    }))
+  };
+}
+
+function rebaseRuntimeFrameFile(filePath: string, fromRepoPath: string, toRepoPath: string): string {
+  const absoluteFromOriginalRepo = path.resolve(fromRepoPath, filePath);
+
+  if (isInsideRoot(toRepoPath, absoluteFromOriginalRepo)) {
+    return normalizePath(path.relative(toRepoPath, absoluteFromOriginalRepo));
+  }
+
+  const absoluteFromRuntimeRepo = path.resolve(toRepoPath, filePath);
+  if (isInsideRoot(toRepoPath, absoluteFromRuntimeRepo)) {
+    return normalizePath(path.relative(toRepoPath, absoluteFromRuntimeRepo));
+  }
+
+  return filePath;
+}
+
+async function findRuntimeServerFile(repoPath: string, failure: RuntimeFailure, hintText: string): Promise<string | undefined> {
+  return (await findRuntimeServerTarget(repoPath, failure, hintText))?.file;
+}
+
+async function findRuntimeServerTarget(
+  repoPath: string,
+  failure: RuntimeFailure,
+  hintText: string
+): Promise<{ repoPath: string; file: string; score: number } | undefined> {
   const endpointPath = new URL(failure.url).pathname;
-  const files = await fg(["src/**/*.ts", "app/**/*.ts", "server.ts"], {
+  const files = await fg(["src/**/*.ts", "app/**/*.ts", "server.ts", "*/src/**/*.ts", "*/app/**/*.ts", "*/server.ts"], {
     cwd: repoPath,
     onlyFiles: true,
     dot: true,
@@ -426,7 +499,8 @@ async function findRuntimeServerFile(repoPath: string, failure: RuntimeFailure):
       ".bugcapsule/**"
     ]
   });
-  const candidates: Array<{ path: string; score: number }> = [];
+  const tokens = tokenize(`${hintText} ${failure.errorMessage}`);
+  const candidates: Array<{ repoPath: string; file: string; score: number }> = [];
 
   for (const filePath of files.map(normalizePath)) {
     const absolutePath = path.join(repoPath, filePath);
@@ -438,19 +512,30 @@ async function findRuntimeServerFile(repoPath: string, failure: RuntimeFailure):
       continue;
     }
 
-    const score = scoreRuntimeServerFile(filePath, content, endpointPath, failure.method);
+    const score = scoreRuntimeServerFile(filePath, content, endpointPath, failure.method, tokens);
 
     if (score > 0) {
-      candidates.push({ path: filePath, score });
+      const packageRoot = await nearestPackageRoot(repoPath, absolutePath);
+      candidates.push({
+        repoPath: packageRoot,
+        file: normalizePath(path.relative(packageRoot, absolutePath)),
+        score
+      });
     }
   }
 
   return candidates
-    .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
-    .at(0)?.path;
+    .sort((left, right) => right.score - left.score || left.repoPath.localeCompare(right.repoPath) || left.file.localeCompare(right.file))
+    .at(0);
 }
 
-function scoreRuntimeServerFile(filePath: string, content: string, endpointPath: string, method: string): number {
+function scoreRuntimeServerFile(
+  filePath: string,
+  content: string,
+  endpointPath: string,
+  method: string,
+  tokens: Set<string>
+): number {
   let score = 0;
 
   if (content.includes(endpointPath)) {
@@ -475,6 +560,13 @@ function scoreRuntimeServerFile(filePath: string, content: string, endpointPath:
 
   if (/fetch\s*\(/.test(content) && content.includes(endpointPath)) {
     score += 1;
+  }
+
+  const normalized = `${filePath} ${content}`.toLowerCase();
+  for (const token of tokens) {
+    if (normalized.includes(token)) {
+      score += 2;
+    }
   }
 
   return score;
@@ -1361,6 +1453,15 @@ function toSameOriginUrl(rawUrl: string, pageUrl: URL): URL | undefined {
   }
 }
 
+function runtimeHintText(options: CreateCapsuleFromRuntimeOptions, failure: RuntimeFailure): string {
+  return [
+    options.bugDescription,
+    options.interactionHint,
+    failure.url,
+    failure.errorMessage
+  ].filter(Boolean).join(" ");
+}
+
 function scoreInteraction(interaction: RuntimeInteraction, tokens: Set<string>): number {
   let score = interaction.method === "GET" ? 0 : 1;
   const normalized = `${interaction.url} ${interaction.reason}`.toLowerCase();
@@ -1401,6 +1502,30 @@ function normalizeFunctionName(functionName: string | undefined): string | undef
     .split(".")
     .at(-1)
     ?.replace(/[^\w$].*$/, "");
+}
+
+async function nearestPackageRoot(repoPath: string, filePath: string): Promise<string> {
+  let current = path.dirname(filePath);
+  const root = path.resolve(repoPath);
+
+  while (isInsideRoot(root, current)) {
+    if (await pathExists(path.join(current, "package.json"))) {
+      return current;
+    }
+
+    if (current === root) {
+      break;
+    }
+
+    current = path.dirname(current);
+  }
+
+  return root;
+}
+
+function isInsideRoot(rootPath: string, candidatePath: string): boolean {
+  const relative = path.relative(rootPath, candidatePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function relatedFilesFromStack(stackTrace: StackFrame[]): RuntimeProbeResult["relatedFiles"] {
