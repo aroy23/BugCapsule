@@ -857,6 +857,48 @@ function renderHtml(report: EvaluationReport): string {
     });
   }
 
+  const impactTilesHtml = cards.map((m) => {
+    const keptPct = Math.max(0, Math.min(100, m.pctOfBefore));
+    const removedPct = Math.max(0, Math.min(100, 100 - keptPct));
+    return `
+            <article class="impact-tile" data-metric="${escapeHtml(m.key)}">
+              <div class="impact-tile-head">
+                <span class="impact-tile-name">${escapeHtml(m.label)}</span>
+                <span class="impact-tile-key">${escapeHtml(m.eyebrow)}</span>
+              </div>
+              <div class="impact-bar" aria-hidden="true">
+                <span class="impact-bar-seg is-kept" style="--w: ${keptPct.toFixed(2)}%"></span>
+                <span class="impact-bar-seg is-removed" style="--w: ${removedPct.toFixed(2)}%"></span>
+                <span class="impact-bar-divider" style="--at: ${keptPct.toFixed(2)}%"></span>
+              </div>
+              <div class="impact-bar-legend">
+                <span class="impact-bar-legend-item is-kept">
+                  <span class="impact-bar-legend-dot"></span>
+                  <span class="impact-bar-legend-text">capsule · ${keptPct.toFixed(1)}%</span>
+                </span>
+                <span class="impact-bar-legend-item is-removed">
+                  <span class="impact-bar-legend-dot"></span>
+                  <span class="impact-bar-legend-text">removed · ${removedPct.toFixed(1)}%</span>
+                </span>
+              </div>
+              <div class="impact-tile-foot">
+                <div class="impact-tile-numbers">
+                  <span class="impact-tile-num"><span class="t">before</span><strong>${escapeHtml(m.before)}</strong></span>
+                  <span class="impact-tile-arrow" aria-hidden="true">→</span>
+                  <span class="impact-tile-num is-after"><span class="t">after</span><strong>${escapeHtml(m.after)}</strong></span>
+                </div>
+                <div class="impact-tile-pct ${m.pct >= 0 ? "is-pos" : "is-neg"}">
+                  <span class="impact-tile-pct-num">${escapeHtml(formatPercent(Math.abs(m.pct)))}</span>
+                  <span class="impact-tile-pct-unit">${m.pct >= 0 ? "removed" : "added"}</span>
+                </div>
+              </div>
+            </article>`;
+  }).join("");
+
+  const headlinePct = c.savings.contextTokensPercent;
+  const keptPct = beforeTokens > 0 ? (afterTokens / beforeTokens) * 100 : 0;
+  const miniFillPct = Math.max(0.5, Math.min(100, keptPct));
+
   const cardsHtml = cards.map((m) => `
         <button class="metric-card" type="button" data-metric="${escapeHtml(m.key)}" aria-expanded="false">
           <div class="card-eyebrow">${escapeHtml(m.eyebrow)}</div>
@@ -1047,6 +1089,323 @@ function renderHtml(report: EvaluationReport): string {
     .topbar-meta { display: flex; flex-wrap: wrap; gap: 6px; }
     .meta-pill { padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--ink-2); }
     .meta-pill .k { color: var(--muted-2); margin-right: 6px; }
+
+    .impact-summary {
+      margin-top: 24px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      overflow: hidden;
+      transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .impact-summary:hover { border-color: var(--border-strong); }
+    .impact-summary.is-open { border-color: var(--border-strong); box-shadow: 0 6px 26px rgba(28, 26, 23, 0.05); }
+
+    .impact-trigger {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 24px;
+      padding: 18px 22px;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    .impact-trigger:focus-visible { outline: 2px solid var(--after); outline-offset: -2px; border-radius: 14px; }
+    .impact-trigger-rail { display: grid; gap: 4px; min-width: 0; }
+    .impact-trigger-eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--muted);
+    }
+    .impact-trigger-eyebrow .dot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--after);
+      box-shadow: 0 0 0 3px var(--after-soft);
+    }
+    .impact-trigger-title {
+      font-family: "Instrument Serif", serif;
+      font-weight: 400;
+      font-size: clamp(18px, 2.2vw, 22px);
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+    }
+    .impact-trigger-title em {
+      font-style: italic;
+      color: var(--after);
+    }
+    .impact-trigger-meta { display: flex; align-items: center; gap: 14px; }
+    .impact-trigger-pill {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 7px 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+    .impact-mini-track {
+      position: relative;
+      display: inline-block;
+      width: 56px; height: 4px;
+      background: var(--before);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .impact-mini-fill {
+      display: block;
+      height: 100%;
+      width: var(--target-w, 0%);
+      background: var(--after);
+      border-right: 1px solid var(--bg);
+    }
+    .impact-trigger-pct {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--ink);
+    }
+    .impact-trigger-pct strong { color: var(--after); font-weight: 500; }
+    .impact-trigger-cta {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 7px 12px 7px 14px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--muted);
+      transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+    }
+    .impact-summary.is-open .impact-trigger-cta { background: var(--after-soft); color: var(--after); border-color: var(--after-line); }
+    .impact-trigger-chevron {
+      display: inline-grid; place-items: center;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      font-size: 12px; line-height: 1;
+      color: var(--ink-2);
+      transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1), background 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+    }
+    .impact-summary.is-open .impact-trigger-chevron {
+      transform: rotate(45deg);
+      background: var(--surface);
+      color: var(--after);
+      border-color: var(--after-line);
+    }
+    .impact-summary.is-open .impact-trigger-cta-text::after {
+      content: "collapse";
+    }
+    .impact-trigger-cta-text { display: inline-block; }
+    .impact-summary.is-open .impact-trigger-cta-text { font-size: 0; }
+    .impact-summary.is-open .impact-trigger-cta-text::after { font-size: 10.5px; letter-spacing: 0.1em; }
+
+    .impact-panel {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+    }
+    .impact-panel-inner { overflow: hidden; min-height: 0; }
+    .impact-summary.is-open .impact-panel { grid-template-rows: 1fr; }
+
+    .impact-panel-body {
+      padding: 8px 22px 24px;
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 22px;
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity 0.35s ease 0.1s, transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) 0.1s;
+    }
+    .impact-summary.is-open .impact-panel-body { opacity: 1; transform: none; }
+
+    .impact-panel-head { display: grid; gap: 6px; padding-top: 18px; max-width: 720px; }
+    .impact-panel-eyebrow { font-family: "JetBrains Mono", monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+    .impact-panel-title {
+      font-family: "Instrument Serif", serif;
+      font-weight: 400;
+      font-size: clamp(20px, 2.6vw, 26px);
+      line-height: 1.22;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+    }
+    .impact-panel-title em { font-style: italic; color: var(--after); }
+
+    .impact-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 14px;
+    }
+    .impact-tile {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 16px 14px;
+      display: grid;
+      gap: 12px;
+    }
+    .impact-tile-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .impact-tile-name {
+      font-family: "Instrument Serif", serif;
+      font-size: 17px;
+      line-height: 1.2;
+      color: var(--ink);
+      letter-spacing: -0.005em;
+    }
+    .impact-tile-key {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9.5px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted-2);
+    }
+
+    .impact-bar {
+      position: relative;
+      display: flex;
+      width: 100%;
+      height: 56px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+    .impact-bar-seg {
+      display: block;
+      height: 100%;
+    }
+    .impact-bar-seg.is-kept {
+      width: var(--w, 50%);
+      min-width: 2px;
+      background: var(--after);
+    }
+    .impact-bar-seg.is-removed {
+      width: var(--w, 50%);
+      min-width: 2px;
+      background:
+        repeating-linear-gradient(45deg, transparent 0 5px, rgba(185, 106, 74, 0.40) 5px 6px),
+        var(--before-soft);
+    }
+    .impact-bar-divider {
+      position: absolute;
+      top: -2px; bottom: -2px;
+      left: var(--at, 50%);
+      width: 1px;
+      background: var(--ink);
+      opacity: 0.55;
+      transform: translateX(-0.5px);
+    }
+    .impact-summary.is-open .impact-bar-seg.is-kept.animate {
+      animation: impact-bar-grow 1.0s cubic-bezier(0.2, 0.7, 0.2, 1) 0.18s both;
+    }
+    .impact-summary.is-open .impact-bar-divider.animate {
+      animation: impact-bar-divider 1.0s cubic-bezier(0.2, 0.7, 0.2, 1) 0.18s both;
+    }
+    @keyframes impact-bar-grow {
+      0%   { width: 100%; }
+      100% { width: var(--w, 50%); }
+    }
+    @keyframes impact-bar-divider {
+      0%   { left: 100%; }
+      100% { left: var(--at, 50%); }
+    }
+
+    .impact-bar-legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: -2px;
+    }
+    .impact-bar-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .impact-bar-legend-dot {
+      display: inline-block;
+      width: 9px; height: 9px;
+      border-radius: 2px;
+    }
+    .impact-bar-legend-item.is-kept .impact-bar-legend-dot { background: var(--after); }
+    .impact-bar-legend-item.is-kept .impact-bar-legend-text { color: var(--after); }
+    .impact-bar-legend-item.is-removed .impact-bar-legend-dot {
+      background:
+        repeating-linear-gradient(45deg, transparent 0 2px, rgba(185, 106, 74, 0.85) 2px 3px),
+        var(--before-soft);
+      border: 1px solid var(--before-line);
+    }
+    .impact-bar-legend-item.is-removed .impact-bar-legend-text { color: var(--before); }
+
+    .impact-tile-foot {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: end;
+    }
+    .impact-tile-numbers {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .impact-tile-num { display: grid; gap: 2px; min-width: 0; }
+    .impact-tile-num .t {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted-2);
+    }
+    .impact-tile-num strong {
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 500;
+      font-size: 12.5px;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    .impact-tile-num.is-after strong { color: var(--after); }
+    .impact-tile-arrow { color: var(--muted-2); font-family: "JetBrains Mono", monospace; font-size: 12px; padding-bottom: 1px; }
+
+    .impact-tile-pct { display: grid; gap: 2px; text-align: right; }
+    .impact-tile-pct-num {
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 500;
+      font-size: 18px;
+      line-height: 1.05;
+      letter-spacing: -0.01em;
+    }
+    .impact-tile-pct.is-pos .impact-tile-pct-num { color: var(--after); }
+    .impact-tile-pct.is-neg .impact-tile-pct-num { color: var(--before); }
+    .impact-tile-pct-unit {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    @media (max-width: 720px) {
+      .impact-trigger { grid-template-columns: 1fr; gap: 12px; }
+      .impact-trigger-meta { justify-content: space-between; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .impact-panel { transition: none; }
+      .impact-panel-body { transition: none; transform: none; }
+      .impact-summary.is-open .impact-bar-seg.is-kept.animate,
+      .impact-summary.is-open .impact-bar-divider.animate { animation: none; }
+      .impact-trigger-chevron { transition: none; }
+    }
 
     .hero { padding: 64px 0 28px; }
     .hero-eyebrow { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 22px; }
@@ -1306,6 +1665,37 @@ function renderHtml(report: EvaluationReport): string {
       </div>
     </div>
 
+    <section class="impact-summary" id="impact-summary">
+      <button class="impact-trigger" type="button" aria-expanded="false" aria-controls="impact-panel">
+        <span class="impact-trigger-rail">
+          <span class="impact-trigger-eyebrow"><span class="dot" aria-hidden="true"></span>at a glance</span>
+          <span class="impact-trigger-title">A visual summary of what BugCapsule <em>removed</em>.</span>
+        </span>
+        <span class="impact-trigger-meta">
+          <span class="impact-trigger-pill" aria-hidden="true">
+            <span class="impact-mini-track"><span class="impact-mini-fill" style="--target-w: ${miniFillPct.toFixed(2)}%"></span></span>
+            <span class="impact-trigger-pct"><strong>${escapeHtml(formatPercent(Math.abs(headlinePct)))}</strong> ${headlinePct >= 0 ? "lighter" : "heavier"}</span>
+          </span>
+          <span class="impact-trigger-cta">
+            <span class="impact-trigger-cta-text">expand</span>
+            <span class="impact-trigger-chevron" aria-hidden="true">＋</span>
+          </span>
+        </span>
+      </button>
+      <div class="impact-panel" id="impact-panel" role="region" aria-label="Visual impact summary">
+        <div class="impact-panel-inner">
+          <div class="impact-panel-body">
+            <header class="impact-panel-head">
+              <span class="impact-panel-eyebrow">— drawn to scale</span>
+              <h2 class="impact-panel-title">Each bar splits the repo's original footprint into what the <em>capsule keeps</em> and what it removes.</h2>
+            </header>
+            <div class="impact-grid">${impactTilesHtml}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="hero">
       <div class="hero-eyebrow">Deterministic context reduction</div>
       <h1 class="hero-headline">
@@ -1427,6 +1817,26 @@ function renderHtml(report: EvaluationReport): string {
 
   <script>
     (function () {
+      var impactSummary = document.querySelector(".impact-summary");
+      var impactTrigger = impactSummary && impactSummary.querySelector(".impact-trigger");
+      if (impactSummary && impactTrigger) {
+        impactTrigger.addEventListener("click", function () {
+          var open = impactSummary.classList.toggle("is-open");
+          impactTrigger.setAttribute("aria-expanded", open ? "true" : "false");
+          if (open) {
+            var animTargets = impactSummary.querySelectorAll(".impact-bar-seg.is-kept, .impact-bar-divider");
+            for (var s = 0; s < animTargets.length; s++) {
+              animTargets[s].classList.remove("animate");
+            }
+            // force reflow so the animation re-triggers on every expand
+            void impactSummary.offsetWidth;
+            for (var t = 0; t < animTargets.length; t++) {
+              animTargets[t].classList.add("animate");
+            }
+          }
+        });
+      }
+
       var cards = document.querySelectorAll(".metric-card");
       for (var i = 0; i < cards.length; i++) {
         cards[i].addEventListener("click", function (e) {
