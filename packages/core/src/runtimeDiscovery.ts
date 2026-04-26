@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import fg from "fast-glob";
 
 import { createCapsule } from "./createCapsule.js";
 import { ensureDir, pathExists, writeTextFile } from "./fileUtils.js";
@@ -105,8 +106,8 @@ export async function createCapsuleFromRuntime(options: CreateCapsuleFromRuntime
       requestBoundary: generatedRepro.input,
       requestBoundarySource: generatedRepro.inputSource
     },
-    upstreamStackTrace: probe.failure.stackTrace,
-    sliceStackTrace: generatedRepro.sliceStackTrace,
+    ...(probe.failure.stackTrace.length > 0 ? { upstreamStackTrace: probe.failure.stackTrace } : {}),
+    ...(generatedRepro.sliceStackTrace.length > 0 ? { sliceStackTrace: generatedRepro.sliceStackTrace } : {}),
     additionalFiles: [
       {
         capsulePath: generatedRepro.path,
@@ -267,7 +268,10 @@ function parseRuntimeFailure(
   const message = structured?.message ?? responseBody.trim();
   const combined = stack ?? message;
   const stackTrace = parseStackTrace(combined, repoPath);
-  const errorMessage = extractFailureSummary(combined);
+  const extractedSummary = extractFailureSummary(combined);
+  const errorMessage = extractedSummary === "Command failed without a recognizable error summary." && message
+    ? message
+    : extractedSummary;
 
   return {
     method: interaction.method,
@@ -288,44 +292,80 @@ async function buildGeneratedRuntimeRepro(
 ): Promise<GeneratedRuntimeRepro | undefined> {
   const payload = await discoverInputPayload(failure);
 
-  if (payload === undefined) {
-    return undefined;
+  if (payload !== undefined) {
+    const target = await selectTargetExport(repoPath, capsuleId, failure, payload.value, [
+      options.bugDescription,
+      options.interactionHint,
+      failure.url
+    ].filter(Boolean).join(" "));
+
+    if (target) {
+      const reproPath = normalizePath(path.join(".bugcapsule", "repros", `${capsuleId}.ts`));
+      const importSpecifier = importSpecifierFor(reproPath, target.file);
+      const lineageFiles = await collectRuntimeLineageFiles(repoPath, target.file);
+      const content = renderRuntimeRepro({
+        reproPath,
+        targetFile: target.file,
+        targetName: target.name,
+        importSpecifier,
+        input: payload.value,
+        failure,
+        lineageFiles
+      });
+
+      return {
+        path: reproPath,
+        command: `npx tsx ${reproPath}`,
+        targetExport: {
+          file: target.file,
+          name: target.name
+        },
+        inputSource: payload.source,
+        input: payload.value,
+        sliceStackTrace: failure.stackTrace.slice(0, target.stackIndex + 1),
+        content
+      };
+    }
   }
 
-  const target = await selectTargetExport(repoPath, capsuleId, failure, payload.value, [
-    options.bugDescription,
-    options.interactionHint,
-    failure.url
-  ].filter(Boolean).join(" "));
+  return buildGeneratedServerInteractionRepro(repoPath, capsuleId, failure);
+}
 
-  if (!target) {
+async function buildGeneratedServerInteractionRepro(
+  repoPath: string,
+  capsuleId: string,
+  failure: RuntimeFailure
+): Promise<GeneratedRuntimeRepro | undefined> {
+  const serverFile = await findRuntimeServerFile(repoPath, failure);
+
+  if (!serverFile) {
     return undefined;
   }
 
   const reproPath = normalizePath(path.join(".bugcapsule", "repros", `${capsuleId}.ts`));
-  const importSpecifier = importSpecifierFor(reproPath, target.file);
-  const lineageFiles = await collectRuntimeLineageFiles(repoPath, target.file);
-  const content = renderRuntimeRepro({
-    reproPath,
-    targetFile: target.file,
-    targetName: target.name,
-    importSpecifier,
-    input: payload.value,
-    failure,
-    lineageFiles
-  });
+  const failedUrl = new URL(failure.url);
+  const interactionPath = `${failedUrl.pathname}${failedUrl.search}`;
+  const input = {
+    method: failure.method,
+    path: interactionPath
+  };
 
   return {
     path: reproPath,
     command: `npx tsx ${reproPath}`,
     targetExport: {
-      file: target.file,
-      name: target.name
+      file: serverFile,
+      name: "runtimeInteraction"
     },
-    inputSource: payload.source,
-    input: payload.value,
-    sliceStackTrace: failure.stackTrace.slice(0, target.stackIndex + 1),
-    content
+    inputSource: `runtime interaction ${failure.method} ${interactionPath}`,
+    input,
+    sliceStackTrace: [],
+    content: renderServerInteractionRepro({
+      importSpecifier: importSpecifierFor(reproPath, serverFile),
+      method: failure.method,
+      path: interactionPath,
+      port: portForCapsule(capsuleId)
+    })
   };
 }
 
@@ -369,6 +409,75 @@ async function discoverInputPayload(failure: RuntimeFailure): Promise<{ value: u
   }
 
   return undefined;
+}
+
+async function findRuntimeServerFile(repoPath: string, failure: RuntimeFailure): Promise<string | undefined> {
+  const endpointPath = new URL(failure.url).pathname;
+  const files = await fg(["src/**/*.ts", "app/**/*.ts", "server.ts"], {
+    cwd: repoPath,
+    onlyFiles: true,
+    dot: true,
+    ignore: [
+      "node_modules/**",
+      "dist/**",
+      ".next/**",
+      "coverage/**",
+      ".git/**",
+      ".bugcapsule/**"
+    ]
+  });
+  const candidates: Array<{ path: string; score: number }> = [];
+
+  for (const filePath of files.map(normalizePath)) {
+    const absolutePath = path.join(repoPath, filePath);
+    let content: string;
+
+    try {
+      content = await fs.readFile(absolutePath, "utf8");
+    } catch {
+      continue;
+    }
+
+    const score = scoreRuntimeServerFile(filePath, content, endpointPath, failure.method);
+
+    if (score > 0) {
+      candidates.push({ path: filePath, score });
+    }
+  }
+
+  return candidates
+    .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
+    .at(0)?.path;
+}
+
+function scoreRuntimeServerFile(filePath: string, content: string, endpointPath: string, method: string): number {
+  let score = 0;
+
+  if (content.includes(endpointPath)) {
+    score += 8;
+  }
+
+  if (new RegExp(`method\\s*===\\s*["'\`]${escapeRegExp(method)}["'\`]`, "i").test(content)) {
+    score += 2;
+  }
+
+  if (/\bcreateServer\b/.test(content)) {
+    score += 3;
+  }
+
+  if (/\.listen\s*\(/.test(content)) {
+    score += 3;
+  }
+
+  if (/(^|\/)(web\/server|server)\.ts$/.test(filePath)) {
+    score += 3;
+  }
+
+  if (/fetch\s*\(/.test(content) && content.includes(endpointPath)) {
+    score += 1;
+  }
+
+  return score;
 }
 
 async function selectTargetExport(
@@ -489,6 +598,10 @@ function normalizeFailureText(value: string): string {
     .toLowerCase();
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function renderRuntimeRepro(options: {
   reproPath: string;
   targetFile: string;
@@ -600,6 +713,66 @@ function isPlaceholderString(value: string): boolean {
   return trimmed.length === 0 || !/[A-Za-z0-9]/.test(trimmed) || PLACEHOLDER_LITERALS.has(trimmed.toLowerCase());
 }
 `;
+}
+
+function renderServerInteractionRepro(options: {
+  importSpecifier: string;
+  method: string;
+  path: string;
+  port: number;
+}): string {
+  return `process.env.PORT = ${JSON.stringify(String(options.port))};
+
+const baseUrl = "http://127.0.0.1:" + process.env.PORT;
+const interactionPath = ${JSON.stringify(options.path)};
+
+await import(${JSON.stringify(options.importSpecifier)});
+await waitForServer(baseUrl);
+
+const response = await fetch(new URL(interactionPath, baseUrl), {
+  method: ${JSON.stringify(options.method)},
+  headers: {
+    accept: "application/json,text/plain;q=0.8,*/*;q=0.5"
+  }
+});
+const body = await response.text();
+
+if (response.status >= 400) {
+  console.error(body);
+  process.exitCode = 1;
+} else {
+  console.log(body || JSON.stringify({ ok: true, status: response.status }));
+}
+
+setTimeout(() => process.exit(process.exitCode ?? 0), 50);
+
+async function waitForServer(baseUrl: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      await fetch(baseUrl);
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Runtime server did not start.");
+}
+`;
+}
+
+function portForCapsule(capsuleId: string): number {
+  let hash = 0;
+
+  for (const char of capsuleId) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return 31_000 + (hash % 20_000);
 }
 
 async function collectRuntimeLineageFiles(

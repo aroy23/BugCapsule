@@ -205,6 +205,64 @@ export function normalizeShippingAddress(address: Address | null): NormalizedAdd
       })
     ]));
   });
+
+  it("falls back to a server interaction repro when the runtime response has no stack or sample payload", async () => {
+    const repoPath = path.join(tempRoot, "server-fallback");
+    await writeRuntimeServerFallbackRepo(repoPath);
+    const baseUrl = await startServer((request, response) => {
+      const requestUrl = new URL(request.url ?? "/", "http://localhost");
+
+      if (request.method === "GET" && requestUrl.pathname === "/") {
+        response.writeHead(200, { "content-type": "text/html" });
+        response.end("<button>Complete Checkout</button><script>fetch('/api/checkout', { method: 'POST' })</script>");
+        return;
+      }
+
+      if (request.method === "POST" && requestUrl.pathname === "/api/checkout") {
+        response.writeHead(500, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          error: "Cannot read properties of null (reading 'line1')"
+        }));
+        return;
+      }
+
+      response.writeHead(404);
+      response.end();
+    });
+
+    const result = await createCapsuleFromRuntime({
+      repoPath,
+      url: baseUrl,
+      bugDescription: "the Complete Checkout button does not work",
+      capsuleId: "bc_runtime_server_fallback",
+      installDependencies: false,
+      verifyCapsule: false
+    });
+
+    if (!("capsulePath" in result)) {
+      throw new Error(result.message);
+    }
+
+    expect(result.status).toBe("created_failing");
+    expect(result.generatedRepro).toEqual(expect.objectContaining({
+      targetExport: {
+        file: "src/server.ts",
+        name: "runtimeInteraction"
+      },
+      inputSource: "runtime interaction POST /api/checkout"
+    }));
+    expect(result.manifest.originalRepro.stackTrace).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        file: "src/checkout/normalizeAddress.ts"
+      })
+    ]));
+    expect(result.manifest.files.map((file) => file.capsulePath)).toEqual(expect.arrayContaining([
+      ".bugcapsule/repros/bc_runtime_server_fallback.ts",
+      "src/server.ts",
+      "src/checkout/checkoutService.ts",
+      "src/checkout/normalizeAddress.ts"
+    ]));
+  });
 });
 
 async function startServer(handler: http.RequestListener): Promise<string> {
@@ -326,6 +384,104 @@ export function handleCheckout(raw: CheckoutInput): { destination: string } {
   await writeFile(repoPath, "src/payments/paymentGateway.ts", `export function authorizePayment(paymentToken: string): void {
   void paymentToken;
 }
+`);
+}
+
+async function writeRuntimeServerFallbackRepo(repoPath: string): Promise<void> {
+  await fs.rm(repoPath, { recursive: true, force: true });
+  await writeFile(repoPath, "package.json", `${JSON.stringify({
+    name: "runtime-server-fallback",
+    private: true,
+    type: "module",
+    devDependencies: {
+      tsx: "^4.20.0",
+      typescript: "^6.0.3"
+    }
+  }, null, 2)}\n`);
+  await writeFile(repoPath, "tsconfig.json", `${JSON.stringify({
+    compilerOptions: {
+      target: "ES2022",
+      module: "NodeNext",
+      moduleResolution: "NodeNext",
+      strict: true,
+      esModuleInterop: true,
+      skipLibCheck: true,
+      types: ["node"]
+    },
+    include: ["src/**/*.ts", ".bugcapsule/**/*.ts"]
+  }, null, 2)}\n`);
+
+  try {
+    await fs.symlink(path.resolve("node_modules"), path.join(repoPath, "node_modules"), "dir");
+  } catch {
+    // The test can still use npx's normal resolution path if the symlink cannot be created.
+  }
+
+  await writeFile(repoPath, "src/checkout/types.ts", `export type Address = {
+  line1: string;
+};
+
+export type CheckoutInput = {
+  cartId: string;
+  shippingAddress: Address | null;
+};
+`);
+  await writeFile(repoPath, "src/checkout/normalizeAddress.ts", `import type { Address } from "./types.js";
+
+export function normalizeShippingAddress(address: Address | null): { line1: string } {
+  return {
+    line1: address!.line1.trim()
+  };
+}
+`);
+  await writeFile(repoPath, "src/checkout/checkoutService.ts", `import { normalizeShippingAddress } from "./normalizeAddress.js";
+import type { CheckoutInput } from "./types.js";
+
+export function completeCheckout(input: CheckoutInput): { destination: string } {
+  const address = normalizeShippingAddress(input.shippingAddress);
+  return {
+    destination: address.line1
+  };
+}
+`);
+  await writeFile(repoPath, "src/server.ts", `import { createServer } from "node:http";
+
+import { completeCheckout } from "./checkout/checkoutService.js";
+
+const port = Number(process.env.PORT ?? "4177");
+
+const server = createServer((request, response) => {
+  const requestUrl = new URL(request.url ?? "/", "http://localhost");
+
+  if (request.method === "GET" && requestUrl.pathname === "/") {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end("<button>Complete Checkout</button><script>fetch('/api/checkout', { method: 'POST' })</script>");
+    return;
+  }
+
+  if (request.method === "POST" && requestUrl.pathname === "/api/checkout") {
+    try {
+      const result = completeCheckout({
+        cartId: "cart_123",
+        shippingAddress: null
+      });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(result));
+    } catch (error) {
+      console.error(error);
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error)
+      }));
+    }
+    return;
+  }
+
+  response.writeHead(404);
+  response.end();
+});
+
+server.listen(port);
 `);
 }
 
