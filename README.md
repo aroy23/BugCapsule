@@ -6,11 +6,6 @@ It is MCP-first: there is no standalone CLI or installable agent skill package. 
 
 **Report:** [Read our comprehensive implementation and testing report](docs/bugcapsule_report.pdf)
 
-## Supporting Repos
-
-- Demo test repo: [BugCapsuleDemo](https://github.com/aroy23/BugCapsuleDemo)
-- Stress testing suite: [BugCapsuleTesting](https://github.com/aroy23/BugCapsuleTesting)
-
 ## Packages
 
 - `@bugcapsule/core`: capsule creation, slicing, verification, and apply-back logic.
